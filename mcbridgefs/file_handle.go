@@ -1,4 +1,4 @@
-package bridgefs
+package mcbridgefs
 
 import (
 	"context"

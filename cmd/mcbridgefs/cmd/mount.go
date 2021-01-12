@@ -19,7 +19,7 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/materials-commons/mcglobusfs/bridgefs"
+	"github.com/materials-commons/mcglobusfs/mcbridgefs"
 	"os"
 	"os/signal"
 	"syscall"
@@ -59,7 +59,7 @@ type Server struct {
 	mountPoint string
 }
 
-func mustMount(mountPoint string, root *bridgefs.Node) *Server {
+func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
 	opts := &fs.Options{
 		AttrTimeout:  &timeout,
 		EntryTimeout: &timeout,

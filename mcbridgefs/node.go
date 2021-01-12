@@ -1,4 +1,4 @@
-package bridgefs
+package mcbridgefs
 
 import (
 	"context"
@@ -144,7 +144,6 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-
 	return nil, 0, syscall.EIO
 }
 

@@ -1,4 +1,4 @@
-package bridgefs
+package mcbridgefs
 
 type File struct {
 	ID          int    `json:"id"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/materials-commons/mcglobusfs/bridgefs"
 	"gorm.io/gorm"
 	"hash/fnv"
 	"os/user"
@@ -12,57 +13,14 @@ import (
 	"syscall"
 )
 
-// loopbackRoot holds the parameters for creating a new loopback
-// filesystem. Loopback filesystem delegate their operations to an
-// underlying POSIX file system.
-type bridgeRoot struct {
-	// The path to the root of the underlying file system.
-	Path string
-
-	// The device on which the Path resides. This must be set if
-	// the underlying filesystem crosses file systems.
-	Dev uint64
-
-	// NewNode returns a new InodeEmbedder to be used to respond
-	// to a LOOKUP/CREATE/MKDIR/MKNOD opcode. If not set, use a
-	// LoopbackNode.
-	NewNode func(rootData *bridgeRoot) fs.InodeEmbedder
-}
-
-func (r *bridgeRoot) newNode() fs.InodeEmbedder {
-	if r.NewNode != nil {
-		return r.NewNode(r)
-	}
-	return &Node{
-		RootData: r,
-	}
-}
-
-func (r *bridgeRoot) idFromStat(st *syscall.Stat_t) fs.StableAttr {
-	// We compose an inode number by the underlying inode, and
-	// mixing in the device number. In traditional filesystems,
-	// the inode numbers are small. The device numbers are also
-	// small (typically 16 bit). Finally, we mask out the root
-	// device number of the root, so a loopback FS that does not
-	// encompass multiple mounts will reflect the inode numbers of
-	// the underlying filesystem
-	swapped := (uint64(st.Dev) << 32) | (uint64(st.Dev) >> 32)
-	swappedRootDev := (r.Dev << 32) | (r.Dev >> 32)
-	return fs.StableAttr{
-		Mode: uint32(st.Mode),
-		Gen:  1,
-		// This should work well for traditional backing FSes,
-		// not so much for other go-fuse FS-es
-		Ino: (swapped ^ swappedRootDev) ^ st.Ino,
-	}
-}
-
+// TODO: projectID and mcfsRoot should be saved in a single place, not in every node
+// TODO: Check if db is threadsafe
 type Node struct {
-	fs.Inode
 	db        *gorm.DB
 	projectID int
 	file      *MCFile
-	RootData  *bridgeRoot
+	mcfsRoot  string
+	*bridgefs.BridgeNode
 }
 
 var uid, gid uint32
@@ -78,8 +36,19 @@ func init() {
 	gid = uint32(gid32)
 }
 
+func (n *Node) newNode() *Node {
+	return &Node{
+		db:         n.db,
+		projectID:  n.projectID,
+		mcfsRoot:   n.mcfsRoot,
+		BridgeNode: bridgefs.NewBridgeNode(n.BridgeNode).(*bridgefs.BridgeNode),
+	}
+}
+
+var _ = (fs.NodeReaddirer)((*Node)(nil))
+
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	dir, err := n.getMCFile()
+	dir, err := n.getMCFile("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -107,23 +76,31 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// TODO: Get the file from the database and then use that to compute the inode
-	p := filepath.Join(n.Path(n.Root()), name)
+	f, err := n.getMCFile(name)
+	if err != nil {
+		return nil, syscall.ENOENT
+	}
 
 	st := syscall.Stat_t{}
-	err := syscall.Lstat(p, &st)
-	if err != nil {
+	if err := syscall.Lstat(f.ToPath(n.mcfsRoot), &st); err != nil {
 		return nil, fs.ToErrno(err)
 	}
 
 	out.Attr.FromStat(&st)
-	node := n.RootData.newNode()
-	return n.NewInode(ctx, node, n.RootData.idFromStat(&st)), fs.OK
+
+	node := n.newNode()
+	node.file = f
+	return n.NewInode(ctx, node, n.RootData.StableAttrFromStat(&st)), fs.OK
 }
 
-func (n *Node) getMCFile() (*MCFile, error) {
+func (n *Node) path(name string) string {
+	return filepath.Join("/", n.GetRealPath(name))
+}
+
+func (n *Node) getMCFile(name string) (*MCFile, error) {
 	var file MCFile
 	if err := n.db.Preload("Directory").
-		Where("project_id = ? and path = ?", n.projectID, n.path("")).
+		Where("project_id = ? and path = ?", n.projectID, n.path(name)).
 		Find(&file).Error; err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -151,9 +128,9 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 	return syscall.EIO
 }
 
-func (n *Node) path(name string) string {
-	return filepath.Join("/", n.Path(n.Root()), name)
-}
+//func (n *Node) path(name string) string {
+//	return filepath.Join("/", n.Path(n.Root()), name)
+//}
 
 func (n *Node) getMode(entry *MCFile) uint32 {
 	if entry == nil {

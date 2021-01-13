@@ -1,7 +1,13 @@
 package mcbridgefs
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 type File struct {
 	ID          int    `json:"id"`
+	UUID        string `json:"string"`
 	ProjectID   int    `json:"project_id"`
 	Name        string `json:"name"`
 	Path        string `json:"path"`
@@ -35,4 +41,9 @@ func (f MCFile) FullPath() string {
 	}
 
 	return f.Directory.Path + "/" + f.Name
+}
+
+func (f MCFile) ToPath(mcdir string) string {
+	uuidParts := strings.Split(f.UUID, "-")
+	return filepath.Join(mcdir, uuidParts[1][0:2], uuidParts[1][2:4], f.UUID)
 }

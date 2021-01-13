@@ -15,28 +15,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (n *bridgeNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
-	sz, err := unix.Lgetxattr(n.path(), attr, dest)
+func (n *BridgeNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	sz, err := unix.Lgetxattr(n.path(""), attr, dest)
 	return uint32(sz), fs.ToErrno(err)
 }
 
-func (n *bridgeNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
-	err := unix.Lsetxattr(n.path(), attr, data, int(flags))
+func (n *BridgeNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+	err := unix.Lsetxattr(n.path(""), attr, data, int(flags))
 	return fs.ToErrno(err)
 }
 
-func (n *bridgeNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
-	err := unix.Lremovexattr(n.path(), attr)
+func (n *BridgeNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
+	err := unix.Lremovexattr(n.path(""), attr)
 	return fs.ToErrno(err)
 }
 
-func (n *bridgeNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
-	sz, err := unix.Llistxattr(n.path(), dest)
+func (n *BridgeNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	sz, err := unix.Llistxattr(n.path(""), dest)
 	return uint32(sz), fs.ToErrno(err)
 }
 
-func (n *bridgeNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
-	fd1, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0)
+func (n *BridgeNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
+	fd1, err := syscall.Open(n.path(""), syscall.O_DIRECTORY, 0)
 	if err != nil {
 		return fs.ToErrno(err)
 	}
@@ -55,7 +55,7 @@ func (n *bridgeNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 
 	// Double check that nodes didn't change from under us.
 	inode := &n.Inode
-	if inode.Root() != inode && inode.StableAttr().Ino != n.RootData.idFromStat(&st).Ino {
+	if inode.Root() != inode && inode.StableAttr().Ino != n.RootData.StableAttrFromStat(&st).Ino {
 		return syscall.EBUSY
 	}
 	if err := syscall.Fstat(fd2, &st); err != nil {
@@ -63,14 +63,14 @@ func (n *bridgeNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 	}
 
 	newinode := newparent.EmbeddedInode()
-	if newinode.Root() != newinode && newinode.StableAttr().Ino != n.RootData.idFromStat(&st).Ino {
+	if newinode.Root() != newinode && newinode.StableAttr().Ino != n.RootData.StableAttrFromStat(&st).Ino {
 		return syscall.EBUSY
 	}
 
 	return fs.ToErrno(unix.Renameat2(fd1, name, fd2, newName, unix.RENAME_EXCHANGE))
 }
 
-func (n *bridgeNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
+func (n *BridgeNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 	offIn uint64, out *fs.Inode, fhOut fs.FileHandle, offOut uint64,
 	len uint64, flags uint64) (uint32, syscall.Errno) {
 	lfIn, ok := fhIn.(*FileHandleBridge)

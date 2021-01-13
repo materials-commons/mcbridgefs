@@ -16,23 +16,23 @@ import (
 	"github.com/hanwen/go-fuse/v2/internal/utimens"
 )
 
-func (n *bridgeNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+func (n *BridgeNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	return 0, syscall.ENOSYS
 }
 
-func (n *bridgeNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+func (n *BridgeNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
 	return syscall.ENOSYS
 }
 
-func (n *bridgeNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
+func (n *BridgeNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 	return syscall.ENOSYS
 }
 
-func (n *bridgeNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+func (n *BridgeNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	return 0, syscall.ENOSYS
 }
 
-func (n *bridgeNode) renameExchange(name string, newparent InodeEmbedder, newName string) syscall.Errno {
+func (n *BridgeNode) renameExchange(name string, newparent InodeEmbedder, newName string) syscall.Errno {
 	return syscall.ENOSYS
 }
 
@@ -98,7 +98,7 @@ func timeToTimeval(t *time.Time) syscall.Timeval {
 
 // MacOS before High Sierra lacks utimensat() and UTIME_OMIT.
 // We emulate using utimes() and extra Getattr() calls.
-func (f *loopbackFile) utimens(a *time.Time, m *time.Time) syscall.Errno {
+func (f *BridgeNode) utimens(a *time.Time, m *time.Time) syscall.Errno {
 	var attr fuse.AttrOut
 	if a == nil || m == nil {
 		errno := f.Getattr(context.Background(), &attr)
@@ -111,7 +111,7 @@ func (f *loopbackFile) utimens(a *time.Time, m *time.Time) syscall.Errno {
 	return ToErrno(err)
 }
 
-func (n *bridgeNode) CopyFileRange(ctx context.Context, fhIn FileHandle,
+func (n *BridgeNode) CopyFileRange(ctx context.Context, fhIn FileHandle,
 	offIn uint64, out *Inode, fhOut FileHandle, offOut uint64,
 	len uint64, flags uint64) (uint32, syscall.Errno) {
 	return 0, syscall.ENOSYS

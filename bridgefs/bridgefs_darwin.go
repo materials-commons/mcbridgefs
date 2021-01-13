@@ -36,7 +36,7 @@ func (n *BridgeNode) renameExchange(name string, newparent InodeEmbedder, newNam
 	return syscall.ENOSYS
 }
 
-func (f *loopbackFile) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
+func (n *BridgeNode) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
 	// TODO: Handle `mode` parameter.
 
 	// From `man fcntl` on OSX:
@@ -98,16 +98,16 @@ func timeToTimeval(t *time.Time) syscall.Timeval {
 
 // MacOS before High Sierra lacks utimensat() and UTIME_OMIT.
 // We emulate using utimes() and extra Getattr() calls.
-func (f *BridgeNode) utimens(a *time.Time, m *time.Time) syscall.Errno {
+func (n *BridgeNode) utimens(a *time.Time, m *time.Time) syscall.Errno {
 	var attr fuse.AttrOut
 	if a == nil || m == nil {
-		errno := f.Getattr(context.Background(), &attr)
+		errno := n.Getattr(context.Background(), &attr)
 		if errno != 0 {
 			return errno
 		}
 	}
 	tv := utimens.Fill(a, m, &attr.Attr)
-	err := syscall.Futimes(int(f.fd), tv)
+	err := syscall.Futimes(int(n.fd), tv)
 	return ToErrno(err)
 }
 

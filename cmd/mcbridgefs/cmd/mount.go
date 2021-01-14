@@ -15,11 +15,12 @@
 package cmd
 
 import (
-	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/mcglobusfs/mcbridgefs"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,25 +32,51 @@ import (
 // mountCmd represents the mount command
 var mountCmd = &cobra.Command{
 	Use:   "mount",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Mount a Materials Commons project as a file system",
+	Long: `The 'mount' command will mount a Materials Commons project and present the project
+as a traditional file system. It will intermediate between this view and the actual underlying
+CAS used by Materials Commons.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("mount called")
+		if len(args) != 1 {
+			log.Fatalf("No path specified for mount.")
+		}
+
+		if projectID == -1 {
+			log.Fatalf("No project specified.")
+		}
+
+		db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+		if err != nil {
+			log.Fatalf("Failed to open db: %s", err)
+		}
+
+		rootNode := mcbridgefs.RootNode(db, projectID, mcfsRoot)
+		server := mustMount(args[0], rootNode)
+		go server.listenForUnmount()
+		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
+		server.Wait()
 	},
 }
 
 var (
 	projectID int
+	dsn       string
+	mcfsRoot  string
 )
 
 func init() {
 	rootCmd.AddCommand(mountCmd)
 	mountCmd.PersistentFlags().IntVarP(&projectID, "project-id", "p", -1, "Project Id to mount")
+
+	mcfsRoot = os.Getenv("MCFS_ROOT")
+	if mcfsRoot == "" {
+		log.Fatalf("MCFS_ROOT environment variable not set")
+	}
+
+	dsn = os.Getenv("MCDB_CONNECT_STR")
+	if dsn == "" {
+		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
+	}
 }
 
 var timeout = 10 * time.Second

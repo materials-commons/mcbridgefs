@@ -69,8 +69,11 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
+	fmt.Println("Readdir looking up files for directory: ", dir.ID)
+
 	var files []MCFile
-	err = n.db.Where("directory_id = ?", dir.ID).
+	err = n.db.Preload("Directory").
+		Where("directory_id = ?", dir.ID).
 		Where("current = true").
 		Find(&files).Error
 
@@ -81,6 +84,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	filesList := make([]fuse.DirEntry, 0, len(files))
 
 	for _, fileEntry := range files {
+		fmt.Printf("%+v\n", fileEntry)
 		entry := fuse.DirEntry{
 			Mode: n.getMode(&fileEntry),
 			Name: fileEntry.Name,
@@ -118,16 +122,19 @@ func (n *Node) path(name string) string {
 
 func (n *Node) getMCDir(name string) (*MCFile, error) {
 	var file MCFile
-	fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, n.path(name))
+	path := filepath.Join("/", n.Path(n.Root()), name)
+	fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, path)
 	err := n.db.Preload("Directory").
 		Where("project_id = ?", n.projectID).
-		Where("path = ?", n.path(name)).
-		Find(&file).Error
+		Where("path = ?", path).
+		First(&file).Error
 
 	if err != nil {
+		fmt.Printf("    (%s) returning err: %s\n", path, err)
 		return nil, err
 	}
 
+	fmt.Printf("   (%s) returning: %+v\n", path, file)
 	return &file, nil
 }
 

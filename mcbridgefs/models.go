@@ -3,30 +3,33 @@ package mcbridgefs
 import (
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-type File struct {
-	ID          int    `json:"id"`
-	UUID        string `json:"string"`
-	ProjectID   int    `json:"project_id"`
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	DirectoryID int    `json:"directory_id"`
-	Size        uint64 `json:"size"`
-	Checksum    string `json:"checksum"`
-	MimeType    string `json:"mime_type"`
-}
-
 type MCFile struct {
-	File
-	Directory File `json:"directory"`
+	ID          int     `json:"id"`
+	UUID        string  `json:"string"`
+	ProjectID   int     `json:"project_id"`
+	Name        string  `json:"name"`
+	Path        string  `json:"path"`
+	DirectoryID int     `json:"directory_id"`
+	Size        uint64  `json:"size"`
+	Checksum    string  `json:"checksum"`
+	MimeType    string  `json:"mime_type"`
+	Directory   *MCFile `gorm:"foreignKey:DirectoryID;references:ID"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
-func (f File) IsFile() bool {
+func (MCFile) TableName() string {
+	return "files"
+}
+
+func (f MCFile) IsFile() bool {
 	return f.MimeType != "directory"
 }
 
-func (f File) IsDir() bool {
+func (f MCFile) IsDir() bool {
 	return f.MimeType == "directory"
 }
 

@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -50,7 +51,9 @@ CAS used by Materials Commons.`,
 			log.Fatalf("Failed to open db: %s", err)
 		}
 
+		fmt.Printf("Creating rootNode\n")
 		rootNode := mcbridgefs.RootNode(db, projectID, mcfsRoot)
+		fmt.Println("Created rootNode")
 		server := mustMount(args[0], rootNode)
 		go server.listenForUnmount()
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])

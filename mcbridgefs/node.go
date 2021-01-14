@@ -2,6 +2,7 @@ package mcbridgefs
 
 import (
 	"context"
+	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -38,6 +39,7 @@ func init() {
 }
 
 func RootNode(db *gorm.DB, projectID int, rootPath string) *Node {
+	fmt.Println("creating rootpath:", rootPath)
 	bridgeRoot, err := bridgefs.NewBridgeRoot(rootPath, nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create root node: %s", err)
@@ -116,6 +118,7 @@ func (n *Node) path(name string) string {
 
 func (n *Node) getMCDir(name string) (*MCFile, error) {
 	var file MCFile
+	fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, n.path(name))
 	err := n.db.Preload("Directory").
 		Where("project_id = ?", n.projectID).
 		Where("path = ?", n.path(name)).

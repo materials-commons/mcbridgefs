@@ -2,6 +2,7 @@ package mcbridgefs
 
 import (
 	"context"
+	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/mcglobusfs/bridgefs"
@@ -36,6 +37,19 @@ func init() {
 	gid = uint32(gid32)
 }
 
+func RootNode(db *gorm.DB, projectID int, rootPath string) *Node {
+	bridgeRoot, err := bridgefs.NewBridgeRoot(rootPath, nil, nil)
+	if err != nil {
+		log.Fatalf("Failed to create root node: %s", err)
+	}
+	return &Node{
+		db:         db,
+		projectID:  projectID,
+		mcfsRoot:   rootPath,
+		BridgeNode: bridgeRoot.(*bridgefs.BridgeNode),
+	}
+}
+
 func (n *Node) newNode() *Node {
 	return &Node{
 		db:         n.db,
@@ -48,14 +62,17 @@ func (n *Node) newNode() *Node {
 var _ = (fs.NodeReaddirer)((*Node)(nil))
 
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	dir, err := n.getMCFile("")
+	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
 	var files []MCFile
-	if err := n.db.Where("directory_id = ?", dir.ID).
-		Find(&files).Error; err != nil {
+	err = n.db.Where("directory_id = ?", dir.ID).
+		Where("current = true").
+		Find(&files).Error
+
+	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
@@ -76,7 +93,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// TODO: Get the file from the database and then use that to compute the inode
-	f, err := n.getMCFile(name)
+	f, err := n.getMCDir(name)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -97,15 +114,35 @@ func (n *Node) path(name string) string {
 	return filepath.Join("/", n.GetRealPath(name))
 }
 
-func (n *Node) getMCFile(name string) (*MCFile, error) {
+func (n *Node) getMCDir(name string) (*MCFile, error) {
 	var file MCFile
-	if err := n.db.Preload("Directory").
-		Where("project_id = ? and path = ?", n.projectID, n.path(name)).
-		Find(&file).Error; err != nil {
-		return nil, syscall.ENOENT
+	err := n.db.Preload("Directory").
+		Where("project_id = ?", n.projectID).
+		Where("path = ?", n.path(name)).
+		Find(&file).Error
+
+	if err != nil {
+		return nil, err
 	}
 
 	return &file, nil
+}
+
+func (n *Node) getMCFile(name string) (*MCFile, error) {
+	return nil, nil
+}
+
+func (n *Node) getMCFilesInDir(directoryID int) ([]MCFile, error) {
+	var files []MCFile
+	err := n.db.Where("directory_id = ?", directoryID).
+		Where("current = true").
+		Find(&files).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
 }
 
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {

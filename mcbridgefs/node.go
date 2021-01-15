@@ -2,13 +2,16 @@ package mcbridgefs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/hashicorp/go-uuid"
 	"github.com/materials-commons/mcglobusfs/bridgefs"
 	"gorm.io/gorm"
 	"hash/fnv"
+	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -22,6 +25,7 @@ type Node struct {
 	db        *gorm.DB
 	projectID int
 	file      *MCFile
+	newFile   *MCFile
 	mcfsRoot  string
 	*bridgefs.BridgeNode
 }
@@ -125,6 +129,15 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// TODO: Get the file from the database and then use that to compute the inode
+	fmt.Println("Lookup: ", filepath.Join("/", n.Path(n.Root()), name))
+	if n.file != nil {
+		fmt.Printf("  Lookup n.file not nil name = %s, size = %d\n", n.file.Name, n.file.Size)
+	}
+
+	if n.newFile != nil {
+		fmt.Printf("  Lookup n.newFile not nil name = %s, size = %d\n", n.newFile.Name, n.newFile.Size)
+	}
+
 	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.ENOENT
@@ -245,39 +258,140 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	var err error
 	fmt.Printf("Node Open flags = %d, path = %s\n", flags, filepath.Join("/", n.Path(n.Root())))
 	if n.file != nil {
 		fmt.Println("   Node Open file != nil, realpath = ", n.file.ToPath(n.mcfsRoot))
 	}
+
 	switch flags & syscall.O_ACCMODE {
 	case syscall.O_RDONLY:
 		fmt.Println("    Open flags O_RDONLY")
 	case syscall.O_WRONLY:
+		n.newFile, err = n.createNewMCFileVersion()
+		if err != nil {
+			// TODO: What error should be returned?
+			return nil, 0, syscall.EIO
+		}
+		flags = flags &^ syscall.O_CREAT
 		fmt.Println("    Open flags O_WRONLY")
 	case syscall.O_RDWR:
+		// If we are here then for now return an error. Need to figure out
+		// how this is handled when opening an existing file vs creating
+		// a new file.
 		fmt.Println("    Open flags O_RDWR")
 	default:
 		fmt.Println("    Open flags Invalid")
 		return
 	}
-	fd, err := syscall.Open(n.file.ToPath(n.mcfsRoot), int(flags), 0)
+
+	path := n.file.ToPath(n.mcfsRoot)
+	if n.newFile != nil {
+		path = n.newFile.ToPath(n.mcfsRoot)
+	}
+	fd, err := syscall.Open(path, int(flags), 0)
 	if err != nil {
+		fmt.Printf("syscall.Open failed, err = %s\n", err)
 		return nil, 0, fs.ToErrno(err)
 	}
 	fhandle := bridgefs.NewBridgeFileHandle(fd)
 	return fhandle, 0, fs.OK
-	//return nil, 0, syscall.EIO
+}
 
-	/*
-		flags = flags &^ syscall.O_APPEND
-			p := n.path("")
-			f, err := syscall.Open(p, int(flags), 0)
-			if err != nil {
-				return nil, 0, fs.ToErrno(err)
-			}
-			lf := NewBridgeFileHandle(f)
-			return lf, 0, 0
-	*/
+func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	fmt.Println("Node Setattr")
+	path := n.file.ToPath(n.mcfsRoot)
+	if n.newFile != nil {
+		path = n.newFile.ToPath(n.mcfsRoot)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("os.Stat %s failed: %s\n", path, err)
+	}
+	if err == nil {
+		fmt.Printf("   Node Setattr stat (%s) size = %d\n", path, fi.Size())
+	}
+	return fs.OK
+}
+
+func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	fmt.Println("Node Release")
+	if bridgeFH, ok := f.(fs.FileReleaser); ok {
+		fmt.Println("   Handle is BridgeFileHandle")
+		if err := bridgeFH.Release(ctx); err != fs.OK {
+			return err
+		}
+
+		fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
+		path := n.file.ToPath(n.mcfsRoot)
+		mcToUpdate := n.file
+		if n.newFile != nil {
+			path = n.newFile.ToPath(n.mcfsRoot)
+			mcToUpdate = n.newFile
+		}
+
+		fi, err := os.Stat(path)
+		if err != nil {
+			fmt.Printf("os.Stat %s failed: %s\n", path, err)
+		}
+		if err == nil {
+			fmt.Printf("   Node Release stat (%s) size = %d\n", path, fi.Size())
+			n.db.Model(mcToUpdate).Update("size", fi.Size())
+			fmt.Printf("mcToUpdate = %+v\n", mcToUpdate)
+		}
+
+		return fs.OK
+	}
+
+	return syscall.EINVAL
+}
+
+func (n *Node) createNewMCFileVersion() (*MCFile, error) {
+	newFile := &MCFile{
+		ProjectID:   n.file.ProjectID,
+		Name:        n.file.Name,
+		DirectoryID: n.file.DirectoryID,
+		Size:        0,
+		Checksum:    "",
+		MimeType:    n.file.MimeType,
+		OwnerID:     n.file.OwnerID,
+		Current:     false,
+	}
+
+	var err error
+	if newFile.UUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
+	// Try to make the directory path where the file will go
+	if err := os.MkdirAll(newFile.ToDirPath(n.mcfsRoot), 0755); err != nil {
+		fmt.Printf("os.MkdirAll failed (%s): %s\n", newFile.ToDirPath(n.mcfsRoot), err)
+		return nil, err
+	}
+
+	f, err := os.OpenFile(newFile.ToPath(n.mcfsRoot), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		fmt.Printf("os.OpenFile failed (%s): %s\n", newFile.ToPath(n.mcfsRoot), err)
+		return nil, err
+	}
+
+	var _ = f.Close()
+
+	result := n.db.Create(newFile)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if result.RowsAffected != 1 {
+		// TODO: Fix this error
+		return nil, errors.New("incorrect rows affected")
+	}
+
+	fmt.Printf("createNewMCFileVersion: %+v\n", newFile)
+
+	return newFile, nil
 }
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {

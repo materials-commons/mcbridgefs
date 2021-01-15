@@ -6,6 +6,7 @@ package bridgefs
 
 import (
 	"context"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"sync"
 
@@ -59,6 +60,7 @@ func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 }
 
 func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
+	fmt.Println("BridgeFileHandle Release")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fd != -1 {
@@ -149,6 +151,7 @@ func (f *BridgeFileHandle) setLock(ctx context.Context, owner uint64, lk *fuse.F
 }
 
 func (f *BridgeFileHandle) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	fmt.Println("BridgeFileHandle Setattr")
 	if errno := f.setAttr(ctx, in); errno != 0 {
 		return errno
 	}

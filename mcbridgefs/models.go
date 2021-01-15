@@ -7,18 +7,20 @@ import (
 )
 
 type MCFile struct {
-	ID          int     `json:"id"`
-	UUID        string  `json:"string"`
-	ProjectID   int     `json:"project_id"`
-	Name        string  `json:"name"`
-	Path        string  `json:"path"`
-	DirectoryID int     `json:"directory_id"`
-	Size        uint64  `json:"size"`
-	Checksum    string  `json:"checksum"`
-	MimeType    string  `json:"mime_type"`
-	Directory   *MCFile `gorm:"foreignKey:DirectoryID;references:ID"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          int       `json:"id"`
+	UUID        string    `json:"string"`
+	ProjectID   int       `json:"project_id"`
+	Name        string    `json:"name"`
+	OwnerID     int       `json:"owner_id"`
+	Path        string    `json:"path"`
+	DirectoryID int       `json:"directory_id"`
+	Size        uint64    `json:"size"`
+	Checksum    string    `json:"checksum"`
+	MimeType    string    `json:"mime_type"`
+	Current     bool      `json:"current"`
+	Directory   *MCFile   `json:"directory" gorm:"foreignKey:DirectoryID;references:ID"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (MCFile) TableName() string {
@@ -47,6 +49,10 @@ func (f MCFile) FullPath() string {
 }
 
 func (f MCFile) ToPath(mcdir string) string {
+	return filepath.Join(f.ToDirPath(mcdir), f.UUID)
+}
+
+func (f MCFile) ToDirPath(mcdir string) string {
 	uuidParts := strings.Split(f.UUID, "-")
-	return filepath.Join(mcdir, uuidParts[1][0:2], uuidParts[1][2:4], f.UUID)
+	return filepath.Join(mcdir, uuidParts[1][0:2], uuidParts[1][2:4])
 }

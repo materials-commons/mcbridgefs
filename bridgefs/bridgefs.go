@@ -380,79 +380,79 @@ func (n *BridgeNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	return fs.OK
 }
 
-var _ = (fs.NodeSetattrer)((*BridgeNode)(nil))
+//var _ = (fs.NodeSetattrer)((*BridgeNode)(nil))
 
-func (n *BridgeNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	fmt.Println("BridgeNode Setattr")
-	p := n.path("")
-	fsa, ok := f.(fs.FileSetattrer)
-	if ok && fsa != nil {
-		fsa.Setattr(ctx, in, out)
-	} else {
-		if m, ok := in.GetMode(); ok {
-			if err := syscall.Chmod(p, m); err != nil {
-				return fs.ToErrno(err)
-			}
-		}
-
-		uid, uok := in.GetUID()
-		gid, gok := in.GetGID()
-		if uok || gok {
-			suid := -1
-			sgid := -1
-			if uok {
-				suid = int(uid)
-			}
-			if gok {
-				sgid = int(gid)
-			}
-			if err := syscall.Chown(p, suid, sgid); err != nil {
-				return fs.ToErrno(err)
-			}
-		}
-
-		mtime, mok := in.GetMTime()
-		atime, aok := in.GetATime()
-
-		if mok || aok {
-
-			ap := &atime
-			mp := &mtime
-			if !aok {
-				ap = nil
-			}
-			if !mok {
-				mp = nil
-			}
-			var ts [2]syscall.Timespec
-			ts[0] = fuse.UtimeToTimespec(ap)
-			ts[1] = fuse.UtimeToTimespec(mp)
-
-			if err := syscall.UtimesNano(p, ts[:]); err != nil {
-				return fs.ToErrno(err)
-			}
-		}
-
-		if sz, ok := in.GetSize(); ok {
-			if err := syscall.Truncate(p, int64(sz)); err != nil {
-				return fs.ToErrno(err)
-			}
-		}
-	}
-
-	fga, ok := f.(fs.FileGetattrer)
-	if ok && fga != nil {
-		fga.Getattr(ctx, out)
-	} else {
-		st := syscall.Stat_t{}
-		err := syscall.Lstat(p, &st)
-		if err != nil {
-			return fs.ToErrno(err)
-		}
-		out.FromStat(&st)
-	}
-	return fs.OK
-}
+//func (n *BridgeNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+//	fmt.Println("BridgeNode Setattr")
+//	p := n.path("")
+//	fsa, ok := f.(fs.FileSetattrer)
+//	if ok && fsa != nil {
+//		fsa.Setattr(ctx, in, out)
+//	} else {
+//		if m, ok := in.GetMode(); ok {
+//			if err := syscall.Chmod(p, m); err != nil {
+//				return fs.ToErrno(err)
+//			}
+//		}
+//
+//		uid, uok := in.GetUID()
+//		gid, gok := in.GetGID()
+//		if uok || gok {
+//			suid := -1
+//			sgid := -1
+//			if uok {
+//				suid = int(uid)
+//			}
+//			if gok {
+//				sgid = int(gid)
+//			}
+//			if err := syscall.Chown(p, suid, sgid); err != nil {
+//				return fs.ToErrno(err)
+//			}
+//		}
+//
+//		mtime, mok := in.GetMTime()
+//		atime, aok := in.GetATime()
+//
+//		if mok || aok {
+//
+//			ap := &atime
+//			mp := &mtime
+//			if !aok {
+//				ap = nil
+//			}
+//			if !mok {
+//				mp = nil
+//			}
+//			var ts [2]syscall.Timespec
+//			ts[0] = fuse.UtimeToTimespec(ap)
+//			ts[1] = fuse.UtimeToTimespec(mp)
+//
+//			if err := syscall.UtimesNano(p, ts[:]); err != nil {
+//				return fs.ToErrno(err)
+//			}
+//		}
+//
+//		if sz, ok := in.GetSize(); ok {
+//			if err := syscall.Truncate(p, int64(sz)); err != nil {
+//				return fs.ToErrno(err)
+//			}
+//		}
+//	}
+//
+//	fga, ok := f.(fs.FileGetattrer)
+//	if ok && fga != nil {
+//		fga.Getattr(ctx, out)
+//	} else {
+//		st := syscall.Stat_t{}
+//		err := syscall.Lstat(p, &st)
+//		if err != nil {
+//			return fs.ToErrno(err)
+//		}
+//		out.FromStat(&st)
+//	}
+//	return fs.OK
+//}
 
 func (n *BridgeNode) path(name string) string {
 	path := n.Path(n.Root())

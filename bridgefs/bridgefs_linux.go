@@ -73,11 +73,11 @@ func (n *BridgeNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 func (n *BridgeNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 	offIn uint64, out *fs.Inode, fhOut fs.FileHandle, offOut uint64,
 	len uint64, flags uint64) (uint32, syscall.Errno) {
-	lfIn, ok := fhIn.(*FileHandleBridge)
+	lfIn, ok := fhIn.(*BridgeFileHandle)
 	if !ok {
 		return 0, syscall.ENOTSUP
 	}
-	lfOut, ok := fhOut.(*FileHandleBridge)
+	lfOut, ok := fhOut.(*BridgeFileHandle)
 	if !ok {
 		return 0, syscall.ENOTSUP
 	}

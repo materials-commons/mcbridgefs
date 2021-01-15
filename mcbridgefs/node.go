@@ -245,16 +245,44 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	return nil, 0, syscall.EIO
+	fmt.Printf("Node Open flags = %d, path = %s\n", flags, filepath.Join("/", n.Path(n.Root())))
+	if n.file != nil {
+		fmt.Println("   Node Open file != nil, realpath = ", n.file.ToPath(n.mcfsRoot))
+	}
+	switch flags & syscall.O_ACCMODE {
+	case syscall.O_RDONLY:
+		fmt.Println("    Open flags O_RDONLY")
+	case syscall.O_WRONLY:
+		fmt.Println("    Open flags O_WRONLY")
+	case syscall.O_RDWR:
+		fmt.Println("    Open flags O_RDWR")
+	default:
+		fmt.Println("    Open flags Invalid")
+		return
+	}
+	fd, err := syscall.Open(n.file.ToPath(n.mcfsRoot), int(flags), 0)
+	if err != nil {
+		return nil, 0, fs.ToErrno(err)
+	}
+	fhandle := bridgefs.NewBridgeFileHandle(fd)
+	return fhandle, 0, fs.OK
+	//return nil, 0, syscall.EIO
+
+	/*
+		flags = flags &^ syscall.O_APPEND
+			p := n.path("")
+			f, err := syscall.Open(p, int(flags), 0)
+			if err != nil {
+				return nil, 0, fs.ToErrno(err)
+			}
+			lf := NewBridgeFileHandle(f)
+			return lf, 0, 0
+	*/
 }
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	return syscall.EIO
 }
-
-//func (n *Node) path(name string) string {
-//	return filepath.Join("/", n.Path(n.Root()), name)
-//}
 
 func (n *Node) getMode(entry *MCFile) uint32 {
 	if entry == nil {

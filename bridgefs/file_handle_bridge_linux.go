@@ -14,7 +14,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-func (f *FileHandleBridge) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
+func (f *BridgeFileHandle) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	err := syscall.Fallocate(f.fd, mode, int64(off), int64(sz))
@@ -25,7 +25,7 @@ func (f *FileHandleBridge) Allocate(ctx context.Context, off uint64, sz uint64, 
 }
 
 // Utimens - file handle based version of FileHandleBridgeSystem.Utimens()
-func (f *FileHandleBridge) utimens(a *time.Time, m *time.Time) syscall.Errno {
+func (f *BridgeFileHandle) utimens(a *time.Time, m *time.Time) syscall.Errno {
 	var ts [2]syscall.Timespec
 	ts[0] = fuse.UtimeToTimespec(a)
 	ts[1] = fuse.UtimeToTimespec(m)

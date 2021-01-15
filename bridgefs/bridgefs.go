@@ -267,7 +267,7 @@ func (n *BridgeNode) Create(ctx context.Context, name string, flags uint32, mode
 
 	node := n.RootData.newNode()
 	ch := n.NewInode(ctx, node, n.RootData.StableAttrFromStat(&st))
-	lf := NewLoopbackFile(fd)
+	lf := NewBridgeFileHandle(fd)
 
 	out.FromStat(&st)
 	return ch, lf, 0, 0
@@ -337,7 +337,7 @@ func (n *BridgeNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
-	lf := NewLoopbackFile(f)
+	lf := NewBridgeFileHandle(f)
 	return lf, 0, 0
 }
 

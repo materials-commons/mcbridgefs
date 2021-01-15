@@ -6,6 +6,7 @@ package bridgefs
 
 import (
 	"context"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"os"
 	"path/filepath"
@@ -131,6 +132,7 @@ func (n *BridgeNode) GetRealPath(name string) string {
 }
 
 func (n *BridgeNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	fmt.Println("BridgeNode Statfs")
 	s := syscall.Statfs_t{}
 	err := syscall.Statfs(n.path(""), &s)
 	if err != nil {
@@ -146,6 +148,7 @@ func (n *BridgeNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Er
 //}
 
 func (n *BridgeNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("BridgeNode Lookup")
 	p := n.path(name)
 
 	st := syscall.Stat_t{}
@@ -174,6 +177,7 @@ func (n *BridgeNode) preserveOwner(ctx context.Context, path string) error {
 }
 
 func (n *BridgeNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("BridgeNode Mknod")
 	p := n.path(name)
 	err := syscall.Mknod(p, mode, int(rdev))
 	if err != nil {
@@ -195,6 +199,7 @@ func (n *BridgeNode) Mknod(ctx context.Context, name string, mode, rdev uint32, 
 }
 
 func (n *BridgeNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("BridgeNode Mkdir")
 	p := n.path(name)
 	err := os.Mkdir(p, os.FileMode(mode))
 	if err != nil {
@@ -216,18 +221,21 @@ func (n *BridgeNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 }
 
 func (n *BridgeNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+	fmt.Println("BridgeNode Rmdir")
 	p := n.path(name)
 	err := syscall.Rmdir(p)
 	return fs.ToErrno(err)
 }
 
 func (n *BridgeNode) Unlink(ctx context.Context, name string) syscall.Errno {
+	fmt.Println("BridgeNode Unlink")
 	p := n.path(name)
 	err := syscall.Unlink(p)
 	return fs.ToErrno(err)
 }
 
 func (n *BridgeNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	fmt.Println("BridgeNode Rename")
 	if flags&fs.RENAME_EXCHANGE != 0 {
 		return n.renameExchange(name, newParent, newName)
 	}
@@ -243,6 +251,7 @@ func (n *BridgeNode) Rename(ctx context.Context, name string, newParent fs.Inode
 var _ = (fs.NodeCreater)((*BridgeNode)(nil))
 
 func (n *BridgeNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	fmt.Println("BridgeNode Create")
 	p := n.path(name)
 	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(p, int(flags)|os.O_CREATE, mode)
@@ -265,6 +274,7 @@ func (n *BridgeNode) Create(ctx context.Context, name string, flags uint32, mode
 }
 
 func (n *BridgeNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("BridgeNode Symlink")
 	p := n.path(name)
 	err := syscall.Symlink(target, p)
 	if err != nil {
@@ -284,7 +294,7 @@ func (n *BridgeNode) Symlink(ctx context.Context, target, name string, out *fuse
 }
 
 func (n *BridgeNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-
+	fmt.Println("BridgeNode Link")
 	p := n.path(name)
 	err := syscall.Link(filepath.Join(n.RootData.Path, target.EmbeddedInode().Path(nil)), p)
 	if err != nil {
@@ -303,6 +313,7 @@ func (n *BridgeNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 }
 
 func (n *BridgeNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	fmt.Println("BridgeNode Readlink")
 	p := n.path("")
 
 	for l := 256; ; l *= 2 {
@@ -319,6 +330,7 @@ func (n *BridgeNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 }
 
 func (n *BridgeNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	fmt.Println("BridgeNode Open")
 	flags = flags &^ syscall.O_APPEND
 	p := n.path("")
 	f, err := syscall.Open(p, int(flags), 0)
@@ -330,6 +342,7 @@ func (n *BridgeNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 }
 
 func (n *BridgeNode) Opendir(ctx context.Context) syscall.Errno {
+	fmt.Printf("Opendir: %s\n", filepath.Join("/", n.Path(n.Root())))
 	fd, err := syscall.Open(n.path(""), syscall.O_DIRECTORY, 0755)
 	if err != nil {
 		return fs.ToErrno(err)
@@ -339,10 +352,13 @@ func (n *BridgeNode) Opendir(ctx context.Context) syscall.Errno {
 }
 
 func (n *BridgeNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	fmt.Println("BridgeNode Readdir")
 	return fs.NewLoopbackDirStream(n.path(""))
 }
 
 func (n *BridgeNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	getattrPath := filepath.Join("/", n.Path(n.Root()))
+	fmt.Println("BridgeNode Getattr: ", getattrPath)
 	if f != nil {
 		return f.(fs.FileGetattrer).Getattr(ctx, out)
 	}
@@ -367,6 +383,7 @@ func (n *BridgeNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 var _ = (fs.NodeSetattrer)((*BridgeNode)(nil))
 
 func (n *BridgeNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	fmt.Println("BridgeNode Setattr")
 	p := n.path("")
 	fsa, ok := f.(fs.FileSetattrer)
 	if ok && fsa != nil {

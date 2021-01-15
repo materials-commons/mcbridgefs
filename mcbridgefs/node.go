@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 // TODO: projectID and mcfsRoot should be saved in a single place, not in every node
@@ -64,12 +65,15 @@ func (n *Node) newNode() *Node {
 var _ = (fs.NodeReaddirer)((*Node)(nil))
 
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	//readdirPath := filepath.Join("/", n.Path(n.Root()))
+	//fmt.Printf("Readdir: %s\n", readdirPath)
 	dir, err := n.getMCDir("")
 	if err != nil {
+		//fmt.Printf("   (%s) failed finding directory: %s\n", readdirPath, err)
 		return nil, syscall.ENOENT
 	}
 
-	fmt.Println("Readdir looking up files for directory: ", dir.ID)
+	//fmt.Println("Readdir looking up files for directory: ", dir.ID)
 
 	var files []MCFile
 	err = n.db.Preload("Directory").
@@ -84,7 +88,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	filesList := make([]fuse.DirEntry, 0, len(files))
 
 	for _, fileEntry := range files {
-		fmt.Printf("%+v\n", fileEntry)
+		//fmt.Printf("%+v\n", fileEntry)
 		entry := fuse.DirEntry{
 			Mode: n.getMode(&fileEntry),
 			Name: fileEntry.Name,
@@ -97,24 +101,92 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	return fs.NewListDirStream(filesList), fs.OK
 }
 
+func (n *Node) Opendir(ctx context.Context) syscall.Errno {
+	return fs.OK
+}
+
+func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	//fmt.Printf("Node Getattr: %s\n", filepath.Join("/", n.Path(n.Root())))
+	if n.file != nil {
+		//fmt.Println("    file for Getattr is not nil")
+		if n.file.IsFile() {
+			out.Size = n.file.Size
+		}
+	}
+
+	out.Uid = uid
+	out.Gid = gid
+
+	now := time.Now()
+	out.SetTimes(&now, &now, &now)
+
+	return fs.OK
+}
+
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// TODO: Get the file from the database and then use that to compute the inode
-	f, err := n.getMCDir(name)
+	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
-	st := syscall.Stat_t{}
-	if err := syscall.Lstat(f.ToPath(n.mcfsRoot), &st); err != nil {
-		return nil, fs.ToErrno(err)
+	var f MCFile
+	err = n.db.Preload("Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("name = ?", name).
+		Where("current = ?", true).
+		First(&f).Error
+
+	if err != nil {
+		return nil, syscall.ENOENT
 	}
 
-	out.Attr.FromStat(&st)
+	out.Uid = uid
+	out.Gid = gid
+	if f.IsFile() {
+		out.Size = f.Size
+	}
+
+	now := time.Now()
+	out.SetTimes(&now, &now, &now)
 
 	node := n.newNode()
-	node.file = f
-	return n.NewInode(ctx, node, n.RootData.StableAttrFromStat(&st)), fs.OK
+	node.file = &f
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(&f), Ino: n.inodeHash(&f)}), fs.OK
+
+	//if f.IsDir() {
+	//
+	//}
+	//
+	//st := syscall.Stat_t{}
+	//if err := syscall.Lstat(f.ToPath(n.mcfsRoot), &st); err != nil {
+	//	return nil, fs.ToErrno(err)
+	//}
+	//
+	//out.Attr.FromStat(&st)
+	//
+	//node := n.newNode()
+	//node.file = f
+	//return n.NewInode(ctx, node, n.RootData.StableAttrFromStat(&st)), fs.OK
 }
+
+/*
+newNode := Node{
+		mcapi:  n.mcapi,
+		MCFile: file,
+	}
+
+	out.Uid = uid
+	out.Gid = gid
+	if file.IsFile() {
+		out.Size = file.Size
+	}
+
+	now := time.Now()
+	out.SetTimes(&now, &now, &now)
+
+	return n.NewInode(ctx, &newNode, fs.StableAttr{Mode: n.getMode(file), Ino: n.inodeHash(file)}), fs.OK
+*/
 
 func (n *Node) path(name string) string {
 	return filepath.Join("/", n.GetRealPath(name))
@@ -123,22 +195,27 @@ func (n *Node) path(name string) string {
 func (n *Node) getMCDir(name string) (*MCFile, error) {
 	var file MCFile
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, path)
+	//fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, path)
 	err := n.db.Preload("Directory").
 		Where("project_id = ?", n.projectID).
 		Where("path = ?", path).
 		First(&file).Error
 
 	if err != nil {
-		fmt.Printf("    (%s) returning err: %s\n", path, err)
+		//fmt.Printf("    (%s) returning err: %s\n", path, err)
 		return nil, err
 	}
 
-	fmt.Printf("   (%s) returning: %+v\n", path, file)
+	//fmt.Printf("   (%s) returning: %+v\n", path, file)
 	return &file, nil
 }
 
 func (n *Node) getMCFile(name string) (*MCFile, error) {
+	//var file MCFile
+	//path := filepath.Join("/", n.Path(n.Root()), name)
+	//err := n.db.Preload("Directory").
+	//	Where("project_id = ?", n.projectID).
+	//	Where("current = true")
 	return nil, nil
 }
 

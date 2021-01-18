@@ -45,12 +45,16 @@ CAS used by Materials Commons.`,
 			log.Fatalf("No project specified.")
 		}
 
+		if globusRequestId == -1 {
+			log.Fatalf("No globus request specified.")
+		}
+
 		db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err != nil {
 			log.Fatalf("Failed to open db: %s", err)
 		}
 
-		rootNode := mcbridgefs.RootNode(db, projectID, mcfsRoot)
+		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestId, mcfsRoot)
 		server := mustMount(args[0], rootNode)
 		go server.listenForUnmount()
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
@@ -59,14 +63,16 @@ CAS used by Materials Commons.`,
 }
 
 var (
-	projectID int
-	dsn       string
-	mcfsRoot  string
+	projectID       int
+	globusRequestId int
+	dsn             string
+	mcfsRoot        string
 )
 
 func init() {
 	rootCmd.AddCommand(mountCmd)
 	mountCmd.PersistentFlags().IntVarP(&projectID, "project-id", "p", -1, "Project Id to mount")
+	mountCmd.PersistentFlags().IntVarP(&globusRequestId, "globus-request-id", "g", -1, "Globus request this mount is associated with")
 
 	mcfsRoot = os.Getenv("MCFS_ROOT")
 	if mcfsRoot == "" {

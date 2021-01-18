@@ -22,11 +22,12 @@ import (
 // TODO: projectID and mcfsRoot should be saved in a single place, not in every node
 // TODO: Check if db is threadsafe
 type Node struct {
-	db        *gorm.DB
-	projectID int
-	file      *MCFile
-	newFile   *MCFile
-	mcfsRoot  string
+	db              *gorm.DB
+	projectID       int
+	globusRequestID int
+	file            *MCFile
+	newFile         *MCFile
+	mcfsRoot        string
 	*bridgefs.BridgeNode
 }
 
@@ -43,17 +44,18 @@ func init() {
 	gid = uint32(gid32)
 }
 
-func RootNode(db *gorm.DB, projectID int, rootPath string) *Node {
+func RootNode(db *gorm.DB, projectID, globusRequestID int, rootPath string) *Node {
 	fmt.Println("creating rootpath:", rootPath)
 	bridgeRoot, err := bridgefs.NewBridgeRoot(rootPath, nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create root node: %s", err)
 	}
 	return &Node{
-		db:         db,
-		projectID:  projectID,
-		mcfsRoot:   rootPath,
-		BridgeNode: bridgeRoot.(*bridgefs.BridgeNode),
+		db:              db,
+		projectID:       projectID,
+		globusRequestID: globusRequestID,
+		mcfsRoot:        rootPath,
+		BridgeNode:      bridgeRoot.(*bridgefs.BridgeNode),
 	}
 }
 
@@ -89,14 +91,49 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
+	// Get files that have been uploaded
+	var globusUploadedFiles []GlobusRequestFile
+	results := n.db.Preload("File").
+		Where("directory_id = ?", dir.ID).
+		Where("globus_request_id = ?", n.globusRequestID).
+		Find(&globusUploadedFiles)
+
+	filesByName := make(map[string]*MCFile)
+	if results.Error == nil && len(globusUploadedFiles) != 0 {
+		// convert the files into a hashtable by name
+		for _, requestFile := range globusUploadedFiles {
+			filesByName[requestFile.File.Name] = requestFile.File
+		}
+	}
+
 	filesList := make([]fuse.DirEntry, 0, len(files))
 
 	for _, fileEntry := range files {
-		//fmt.Printf("%+v\n", fileEntry)
+		// If there is an entry in filesByName then this overrides the directory listing as it means that
+		// a new version of the file has been uploaded.
+		if foundEntry, ok := filesByName[fileEntry.Name]; ok {
+			fileEntry = *foundEntry
+
+			// Remove from the hash table because we are going to need to make one more pass through the
+			// filesByName hash to pick up any newly uploaded files in the directory.
+			delete(filesByName, fileEntry.Name)
+		}
+
 		entry := fuse.DirEntry{
 			Mode: n.getMode(&fileEntry),
 			Name: fileEntry.Name,
 			Ino:  n.inodeHash(&fileEntry),
+		}
+
+		filesList = append(filesList, entry)
+	}
+
+	// Add any newly uploaded files
+	for _, fileEntry := range filesByName {
+		entry := fuse.DirEntry{
+			Mode: n.getMode(fileEntry),
+			Name: fileEntry.Name,
+			Ino:  n.inodeHash(fileEntry),
 		}
 
 		filesList = append(filesList, entry)
@@ -166,40 +203,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	node := n.newNode()
 	node.file = &f
 	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(&f), Ino: n.inodeHash(&f)}), fs.OK
-
-	//if f.IsDir() {
-	//
-	//}
-	//
-	//st := syscall.Stat_t{}
-	//if err := syscall.Lstat(f.ToPath(n.mcfsRoot), &st); err != nil {
-	//	return nil, fs.ToErrno(err)
-	//}
-	//
-	//out.Attr.FromStat(&st)
-	//
-	//node := n.newNode()
-	//node.file = f
-	//return n.NewInode(ctx, node, n.RootData.StableAttrFromStat(&st)), fs.OK
 }
-
-/*
-newNode := Node{
-		mcapi:  n.mcapi,
-		MCFile: file,
-	}
-
-	out.Uid = uid
-	out.Gid = gid
-	if file.IsFile() {
-		out.Size = file.Size
-	}
-
-	now := time.Now()
-	out.SetTimes(&now, &now, &now)
-
-	return n.NewInode(ctx, &newNode, fs.StableAttr{Mode: n.getMode(file), Ino: n.inodeHash(file)}), fs.OK
-*/
 
 func (n *Node) path(name string) string {
 	return filepath.Join("/", n.GetRealPath(name))
@@ -254,6 +258,7 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 }
 
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	fmt.Println("Node Create: ", name)
 	return nil, nil, 0, syscall.EIO
 }
 
@@ -348,6 +353,22 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (n *Node) createNewMCFileVersion() (*MCFile, error) {
+	// First check if there is already a version of this file being written to for this
+	// globus upload context.
+	var err error
+	var globusRequestFile GlobusRequestFile
+	path := filepath.Join("/", n.Path(n.Root()))
+	err = n.db.Preload("File").
+		Where("path = ?", path).
+		Where("globus_request_id = ?", n.globusRequestID).
+		First(&globusRequestFile).Error
+
+	if err != nil {
+		return globusRequestFile.File, nil
+	}
+
+	// There isn't an existing upload, so create a new one
+
 	newFile := &MCFile{
 		ProjectID:   n.file.ProjectID,
 		Name:        n.file.Name,
@@ -359,7 +380,6 @@ func (n *Node) createNewMCFileVersion() (*MCFile, error) {
 		Current:     false,
 	}
 
-	var err error
 	if newFile.UUID, err = uuid.GenerateUUID(); err != nil {
 		return nil, err
 	}
@@ -380,6 +400,29 @@ func (n *Node) createNewMCFileVersion() (*MCFile, error) {
 
 	result := n.db.Create(newFile)
 
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if result.RowsAffected != 1 {
+		// TODO: Fix this error
+		return nil, errors.New("incorrect rows affected")
+	}
+
+	// Create a new globus request file entry to account for the new file
+	globusRequestFile = GlobusRequestFile{
+		ProjectID:       n.projectID,
+		OwnerID:         n.file.OwnerID,
+		GlobusRequestID: n.globusRequestID,
+		Path:            path,
+		FileID:          newFile.ID,
+	}
+
+	if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
+	result = n.db.Create(&globusRequestFile)
 	if result.Error != nil {
 		return nil, result.Error
 	}

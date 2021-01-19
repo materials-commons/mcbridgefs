@@ -15,15 +15,28 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/apex/log"
+	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile  string
+	port     int
+	mcfsRoot string
+	dsn      string
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -37,7 +50,7 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Run: cliCmdRoot,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -52,14 +65,58 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcglobusfsd.yaml)")
+	rootCmd.Flags().IntVarP(&port, "port", "p", 4000, "Port to listen on")
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	mcfsRoot = os.Getenv("MCFS_ROOT")
+	if mcfsRoot == "" {
+		log.Fatalf("MCFS_ROOT environment variable not set")
+	}
+
+	dsn = os.Getenv("MCDB_CONNECT_STR")
+	if dsn == "" {
+		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
+	}
+}
+
+func cliCmdRoot(cmd *cobra.Command, args []string) {
+	log.Infof("Starting mcglobusfsd...")
+	ctx, cancel := context.WithCancel(context.Background())
+	db := connectToDB()
+	e := setupEcho()
+
+	var _ = db
+
+	log.Infof("Listening on port %d", port)
+
+	go func() {
+		if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
+			log.Infof("Shutting down mcglobusfsd: %s", err)
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Infof("Received signal, shutting down mcglobusfsd...")
+	cancel()
+
+	select {
+	case <-time.After(2 * time.Second):
+	}
+
+	if err := e.Shutdown(ctx); err != nil {
+		log.Fatalf("Error shutting down server: %s", err)
+	}
+}
+
+func setupEcho() *echo.Echo {
+	return nil
+}
+
+func connectToDB() *gorm.DB {
+	return nil
 }
 
 // initConfig reads in config file and ENV variables if set.

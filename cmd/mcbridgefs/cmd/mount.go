@@ -18,7 +18,7 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/materials-commons/mcglobusfs/mcbridgefs"
+	"github.com/materials-commons/mcglobusfs/pkg/fs/mcbridgefs"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"os"

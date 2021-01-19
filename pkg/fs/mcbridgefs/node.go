@@ -8,7 +8,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/hashicorp/go-uuid"
-	"github.com/materials-commons/mcglobusfs/bridgefs"
+	"github.com/materials-commons/mcglobusfs/pkg/fs/bridgefs"
 	"gorm.io/gorm"
 	"hash/fnv"
 	"os"

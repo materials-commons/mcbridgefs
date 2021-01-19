@@ -22,6 +22,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/labstack/echo/v4/middleware"
+	"gorm.io/driver/mysql"
+
 	"github.com/apex/log"
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -68,13 +71,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcglobusfsd.yaml)")
 	rootCmd.Flags().IntVarP(&port, "port", "p", 4000, "Port to listen on")
 
-	mcfsRoot = os.Getenv("MCFS_ROOT")
-	if mcfsRoot == "" {
+	if mcfsRoot = os.Getenv("MCFS_ROOT"); mcfsRoot == "" {
 		log.Fatalf("MCFS_ROOT environment variable not set")
 	}
 
-	dsn = os.Getenv("MCDB_CONNECT_STR")
-	if dsn == "" {
+	if dsn = os.Getenv("MCDB_CONNECT_STR"); dsn == "" {
 		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
 	}
 }
@@ -112,11 +113,21 @@ func cliCmdRoot(cmd *cobra.Command, args []string) {
 }
 
 func setupEcho() *echo.Echo {
-	return nil
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
+	return e
 }
 
 func connectToDB() *gorm.DB {
-	return nil
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Failed to open db: %s", err)
+	}
+
+	return db
 }
 
 // initConfig reads in config file and ENV variables if set.

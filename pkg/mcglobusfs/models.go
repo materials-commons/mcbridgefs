@@ -1,4 +1,4 @@
-package mcbridgefs
+package mcglobusfs
 
 import (
 	"path/filepath"

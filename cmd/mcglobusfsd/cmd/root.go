@@ -35,10 +35,11 @@ import (
 )
 
 var (
-	cfgFile  string
-	port     int
-	mcfsRoot string
-	dsn      string
+	cfgFile    string
+	port       int
+	mcfsRoot   string
+	dsn        string
+	bridgeRoot string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -77,6 +78,10 @@ func init() {
 
 	if dsn = os.Getenv("MCDB_CONNECT_STR"); dsn == "" {
 		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
+	}
+
+	if bridgeRoot = os.Getenv("MC_GLOBUS_BRIDGE_ROOT"); bridgeRoot == "" {
+		log.Fatalf("MC_GLOBUS_BRIDGE_ROOT environment variable not set")
 	}
 }
 

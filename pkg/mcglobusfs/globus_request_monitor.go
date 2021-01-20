@@ -77,6 +77,7 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 	//   2. Setting some state to signal it can be imported
 	//   3. Finally we need to remove the Globus ACL giving access to the mount point
 	//      a. Figure out where to get the endpoint id from
+	//      b. Show should remove the acl, perhaps the mcbridgefs should instead?
 	globusClient.DeleteEndpointACLRule("", request.GlobusAclID)
 }
 

@@ -82,5 +82,16 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 }
 
 func (m *GlobusRequestMonitor) processFinishedRequests() {
+	// TODO: Implement project level locking so that only request for a particular project is processed
+	for _, request := range m.retrieveFinishedRequests() {
+		go handleFinishedRequest(&request)
+	}
+}
+
+func (m *GlobusRequestMonitor) retrieveFinishedRequests() []GlobusRequest {
+	return nil
+}
+
+func handleFinishedRequest(g *GlobusRequest) {
 
 }

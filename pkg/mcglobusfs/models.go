@@ -57,12 +57,21 @@ func (f MCFile) ToDirPath(mcdir string) string {
 	return filepath.Join(mcdir, uuidParts[1][0:2], uuidParts[1][2:4])
 }
 
+type User struct {
+	ID         int
+	Email      string
+	GlobusUser string
+}
+
 type GlobusRequest struct {
 	ID               int       `json:"id"`
 	UUID             string    `json:"string"`
 	ProjectID        int       `json:"project_id"`
 	Name             string    `json:"name"`
+	Pid              int       `json:"pid"`
+	State            string    `json:"state"`
 	OwnerID          int       `json:"owner_id"`
+	Owner            *User     `gorm:"foreignKey:OwnerID;references:ID"`
 	Path             string    `json:"path"`
 	GlobusAclID      string    `json:"globus_acl_id"`
 	GlobusPath       string    `json:"globus_path"`

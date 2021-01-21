@@ -35,11 +35,14 @@ import (
 )
 
 var (
-	cfgFile    string
-	port       int
-	mcfsRoot   string
-	dsn        string
-	bridgeRoot string
+	cfgFile          string
+	port             int
+	mcfsRoot         string
+	dsn              string
+	bridgeRoot       string
+	globusCCUser     string
+	globusCCToken    string
+	globusEndpointID string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -82,6 +85,18 @@ func init() {
 
 	if bridgeRoot = os.Getenv("MC_GLOBUS_BRIDGE_ROOT"); bridgeRoot == "" {
 		log.Fatalf("MC_GLOBUS_BRIDGE_ROOT environment variable not set")
+	}
+
+	if globusCCUser = os.Getenv("MC_GLOBUS_CC_USER"); globusCCUser == "" {
+		log.Fatalf("MC_GLOBUS_CC_USER environment variable not set")
+	}
+
+	if globusCCToken = os.Getenv("MC_GLOBUS_CC_TOKEN"); globusCCToken == "" {
+		log.Fatalf("MC_GLOBUS_CC_TOKEN environment variable not set")
+	}
+
+	if globusEndpointID = os.Getenv("MC_GLOBUS_ENDPOINT_ID"); globusEndpointID == "" {
+		log.Fatalf("MC_GLOBUS_ENDPOINT_ID environment variable not set")
 	}
 }
 

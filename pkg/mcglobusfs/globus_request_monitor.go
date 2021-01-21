@@ -2,7 +2,9 @@ package mcglobusfs
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -50,7 +52,13 @@ func (m *GlobusRequestMonitor) startNewRequests() {
 }
 
 func (m *GlobusRequestMonitor) retrieveNewRequests() []GlobusRequest {
-	return nil
+	var requests []GlobusRequest
+	result := m.db.Where("state = ?", "new").Find(&requests)
+	if result.Error != nil {
+		log.Warnf("No entries found")
+	}
+
+	return requests
 }
 
 func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, globusClient *globusapi.Client) {
@@ -65,20 +73,31 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 		log.Errorf("Unable to start mcbridgefs for request %d: %s", request.ID, err)
 		return
 	}
-	// TODO: Need to update the request with our pid
 
 	if err := cmd.Wait(); err != nil {
 		log.Errorf("A mcbridgefs command failed while running: %s", err)
 		return
 	}
 
-	// TODO: Need to signal we are done so that the uploaded files can be revealed in the project by
-	//   1. Setting pid to nil?
-	//   2. Setting some state to signal it can be imported
-	//   3. Finally we need to remove the Globus ACL giving access to the mount point
-	//      a. Figure out where to get the endpoint id from
-	//      b. Show should remove the acl, perhaps the mcbridgefs should instead?
-	globusClient.DeleteEndpointACLRule("", request.GlobusAclID)
+	// TODO: Have the bridge do this instead...
+	if _, err := globusClient.DeleteEndpointACLRule(os.Getenv("MC_GLOBUS_ENDPOINT_ID"), request.GlobusAclID); err != nil {
+		log.Errorf("Error deleting ACL for request %d: %s", request.ID, err)
+	}
+
+	result := db.Model(&request).Updates(GlobusRequest{Pid: 0, State: "done"})
+	if result.Error != nil {
+		log.Errorf("Unable to change request %d to done state: %s", request.ID, result.Error)
+	}
+
+	if result.RowsAffected != 1 {
+		log.Errorf("Unable to change request %d to done state - no rows affected", request.ID)
+	}
+}
+
+func StartMCBridgeFS(globusRequestID, projectID int, path string) (*exec.Cmd, error) {
+	command := fmt.Sprintf("mcbridgefs mount -g %d -p %d %s", globusRequestID, projectID, path)
+	cmd := exec.Command(command)
+	return cmd, cmd.Start()
 }
 
 func (m *GlobusRequestMonitor) processFinishedRequests() {

@@ -15,16 +15,23 @@
 package cmd
 
 import (
-	"github.com/apex/log"
-	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/materials-commons/mcglobusfs/pkg/fs/mcbridgefs"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/pkg/errors"
+
+	"github.com/materials-commons/mcglobusfs/pkg/mcglobusfs"
+
+	"github.com/apex/log"
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/materials-commons/mcglobusfs/pkg/fs/mcbridgefs"
+	"github.com/materials-commons/mcglobusfs/pkg/globusapi"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 
 	"github.com/spf13/cobra"
 )
@@ -45,16 +52,35 @@ CAS used by Materials Commons.`,
 			log.Fatalf("No project specified.")
 		}
 
-		if globusRequestId == -1 {
+		if globusRequestID == -1 {
 			log.Fatalf("No globus request specified.")
 		}
 
-		db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-		if err != nil {
+		var (
+			err          error
+			db           *gorm.DB
+			globusClient *globusapi.Client
+		)
+
+		if db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{}); err != nil {
 			log.Fatalf("Failed to open db: %s", err)
 		}
 
-		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestId, mcfsRoot)
+		if globusClient, err = globusapi.CreateConfidentialClient(globusCCUser, globusCCToken); err != nil {
+			log.Fatalf("Failed to create confidential globus client: %s", err)
+		}
+
+		var globusRequest mcglobusfs.GlobusRequest
+
+		if err := db.Preload("Owner").First(&globusRequest, globusRequestID); err != nil {
+			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, err)
+		}
+
+		if err := setupGlobus(db, globusRequest, globusClient); err != nil {
+			log.Fatalf("Unable to create globus ACL: %s", err)
+		}
+
+		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestID, mcfsRoot)
 		server := mustMount(args[0], rootNode)
 		go server.listenForUnmount()
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
@@ -62,17 +88,50 @@ CAS used by Materials Commons.`,
 	},
 }
 
+func setupGlobus(db *gorm.DB, request mcglobusfs.GlobusRequest, globusClient *globusapi.Client) error {
+	identities, err := globusClient.GetIdentities([]string{request.Owner.GlobusUser})
+	if err != nil {
+		return errors.WithMessage(err, fmt.Sprintf("Unable to retrieve globus user from globus api %s", request.Owner.GlobusUser))
+	}
+
+	globusIdentityID := identities.Identities[0].ID
+
+	path := fmt.Sprintf("/__globus/%s/", request.UUID)
+
+	rule := globusapi.EndpointACLRule{
+		PrincipalType: globusapi.ACLPrincipalTypeIdentity,
+		EndpointID:    globusEndpointID,
+		Path:          path,
+		IdentityID:    globusIdentityID,
+		Permissions:   "rw",
+	}
+
+	aclRes, err := globusClient.AddEndpointACLRule(rule)
+	if err != nil {
+		msg := fmt.Sprintf("Unable to add endpoint rule for endpoint %s, path %s, user %s/%s", globusEndpointID, path, request.Owner.GlobusUser, globusIdentityID)
+		return errors.WithMessage(err, msg)
+	}
+
+	return db.Model(request).Updates(mcglobusfs.GlobusRequest{
+		GlobusAclID:      aclRes.AccessID,
+		GlobusIdentityID: globusIdentityID,
+	}).Error
+}
+
 var (
-	projectID       int
-	globusRequestId int
-	dsn             string
-	mcfsRoot        string
+	projectID        int
+	globusRequestID  int
+	dsn              string
+	mcfsRoot         string
+	globusCCUser     string
+	globusCCToken    string
+	globusEndpointID string
 )
 
 func init() {
 	rootCmd.AddCommand(mountCmd)
 	mountCmd.PersistentFlags().IntVarP(&projectID, "project-id", "p", -1, "Project Id to mount")
-	mountCmd.PersistentFlags().IntVarP(&globusRequestId, "globus-request-id", "g", -1, "Globus request this mount is associated with")
+	mountCmd.PersistentFlags().IntVarP(&globusRequestID, "globus-request-id", "g", -1, "Globus request this mount is associated with")
 
 	mcfsRoot = os.Getenv("MCFS_ROOT")
 	if mcfsRoot == "" {
@@ -82,6 +141,18 @@ func init() {
 	dsn = os.Getenv("MCDB_CONNECT_STR")
 	if dsn == "" {
 		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
+	}
+
+	if globusCCUser = os.Getenv("MC_GLOBUS_CC_USER"); globusCCUser == "" {
+		log.Fatalf("MC_GLOBUS_CC_USER environment variable not set")
+	}
+
+	if globusCCToken = os.Getenv("MC_GLOBUS_CC_TOKEN"); globusCCToken == "" {
+		log.Fatalf("MC_GLOBUS_CC_TOKEN environment variable not set")
+	}
+
+	if globusEndpointID = os.Getenv("MC_GLOBUS_ENDPOINT_ID"); globusEndpointID == "" {
+		log.Fatalf("MC_GLOBUS_ENDPOINT_ID environment variable not set")
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/materials-commons/mcglobusfs/pkg/globusapi"
 
 	"github.com/apex/log"
@@ -68,6 +70,11 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 		return
 	}
 
+	if err := setupGlobusMountPoint(db, request, globusClient); err != nil {
+		log.Errorf("Unable to setup Globus Mount Point for request %d: %s", request.ID, err)
+		return
+	}
+
 	cmd, err := StartMCBridgeFS(request.ID, request.ProjectID, mountPath)
 	if err != nil {
 		log.Errorf("Unable to start mcbridgefs for request %d: %s", request.ID, err)
@@ -92,6 +99,45 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 	if result.RowsAffected != 1 {
 		log.Errorf("Unable to change request %d to done state - no rows affected", request.ID)
 	}
+}
+
+func setupGlobusMountPoint(db *gorm.DB, request *GlobusRequest, globusClient *globusapi.Client) error {
+	identities, err := globusClient.GetIdentities([]string{request.Owner.GlobusUser})
+	if err != nil {
+		return errors.WithMessage(err, fmt.Sprintf("Unable to retrieve globus user from globus api %s", request.Owner.GlobusUser))
+	}
+
+	globusIdentityID := identities.Identities[0].ID
+
+	globusEndpointID := os.Getenv("MC_GLOBUS_ENDPOINT_ID")
+
+	path := makeGlobusPath(request.UUID)
+
+	rule := globusapi.EndpointACLRule{
+		PrincipalType: globusapi.ACLPrincipalTypeIdentity,
+		EndpointID:    globusEndpointID,
+		Path:          path,
+		IdentityID:    globusIdentityID,
+		Permissions:   "rw",
+	}
+
+	aclRes, err := globusClient.AddEndpointACLRule(rule)
+	if err != nil {
+		msg := fmt.Sprintf("Unable to add endpoint rule for endpoint %s, path %s, user %s/%s", globusEndpointID, path, request.Owner.GlobusUser, globusIdentityID)
+		return errors.WithMessage(err, msg)
+	}
+
+	return db.Model(request).Updates(GlobusRequest{
+		GlobusAclID:      aclRes.AccessID,
+		GlobusIdentityID: globusIdentityID,
+	}).Error
+}
+
+// makeGlobusPath constructs the path as Globus expects to see it. Globus needs the path to both
+// start and end with a '/', eg /__globus/abc/.
+func makeGlobusPath(dir string) string {
+	// We need to Sprintf the ending slash because filepath.Join removes the trailing slash.
+	return fmt.Sprintf("%s/", filepath.Join("/", os.Getenv("MC_GLOBUS_ROOT"), dir))
 }
 
 func StartMCBridgeFS(globusRequestID, projectID int, path string) (*exec.Cmd, error) {

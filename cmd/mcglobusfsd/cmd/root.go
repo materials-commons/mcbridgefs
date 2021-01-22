@@ -98,6 +98,11 @@ func init() {
 	if globusEndpointID = os.Getenv("MC_GLOBUS_ENDPOINT_ID"); globusEndpointID == "" {
 		log.Fatalf("MC_GLOBUS_ENDPOINT_ID environment variable not set")
 	}
+
+	// Make sure the environment variable is set, even though we don't need it spawned child processes will.
+	if globusRoot := os.Getenv("MC_GLOBUS_ROOT"); globusRoot == "" {
+		log.Fatalf("MC_GLOBUS_ROOT environment variable not set")
+	}
 }
 
 func cliCmdRoot(cmd *cobra.Command, args []string) {

@@ -16,14 +16,36 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/apex/log"
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/materials-commons/goglobus"
+	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile          string
+	projectID        int
+	globusRequestID  int
+	dsn              string
+	mcfsRoot         string
+	globusCCUser     string
+	globusCCToken    string
+	globusEndpointID string
+	globusRoot       string
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -37,7 +59,96 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) != 1 {
+			log.Fatalf("No path specified for mount.")
+		}
+
+		if projectID == -1 {
+			log.Fatalf("No project specified.")
+		}
+
+		if globusRequestID == -1 {
+			log.Fatalf("No globus request specified.")
+		}
+
+		var (
+			err          error
+			db           *gorm.DB
+			globusClient *globus.Client
+		)
+
+		if db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{}); err != nil {
+			log.Fatalf("Failed to open db: %s", err)
+		}
+
+		if globusClient, err = globus.CreateConfidentialClient(globusCCUser, globusCCToken); err != nil {
+			log.Fatalf("Failed to create confidential globus client: %s", err)
+		}
+
+		var _ = globusClient
+
+		var globusRequest mcmodel.GlobusRequest
+
+		if err := db.Preload("Owner").First(&globusRequest, globusRequestID); err != nil {
+			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, err)
+		}
+
+		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestID, mcfsRoot)
+		server := mustMount(args[0], rootNode)
+		go server.listenForUnmount()
+		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
+		server.Wait()
+	},
+}
+
+// makeGlobusPath constructs the path as Globus expects to see it. Globus needs the path to both
+// start and end with a '/', eg /__globus/abc/.
+func makeGlobusPath(dir string) string {
+	// We need to Sprintf the ending slash because filepath.Join removes the trailing slash.
+	return fmt.Sprintf("%s/", filepath.Join("/", os.Getenv("MC_GLOBUS_ROOT"), dir))
+}
+
+var timeout = 10 * time.Second
+
+type Server struct {
+	*fuse.Server
+	mountPoint string
+}
+
+func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
+	opts := &fs.Options{
+		AttrTimeout:  &timeout,
+		EntryTimeout: &timeout,
+		MountOptions: fuse.MountOptions{
+			Debug:  false,
+			FsName: "mcfs",
+		},
+	}
+
+	server, err := fs.Mount(mountPoint, root, opts)
+	if err != nil {
+		log.Fatalf("Unable to mount project %s", err)
+	}
+
+	return &Server{
+		Server:     server,
+		mountPoint: mountPoint,
+	}
+}
+
+func (s *Server) listenForUnmount() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-c
+	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
+	if err := s.Unmount(); err != nil {
+		log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, s.mountPoint)
+	}
+
+	<-c
+	log.Warnf("Force exiting...")
+	os.Exit(1)
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -51,15 +162,35 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
+	rootCmd.PersistentFlags().IntVarP(&projectID, "project-id", "p", -1, "Project Id to mount")
+	rootCmd.PersistentFlags().IntVarP(&globusRequestID, "globus-request-id", "g", -1, "Globus request this mount is associated with")
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	mcfsRoot = os.Getenv("MCFS_ROOT")
+	if mcfsRoot == "" {
+		log.Fatalf("MCFS_ROOT environment variable not set")
+	}
+
+	dsn = os.Getenv("MCDB_CONNECT_STR")
+	if dsn == "" {
+		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
+	}
+
+	if globusCCUser = os.Getenv("MC_GLOBUS_CC_USER"); globusCCUser == "" {
+		log.Fatalf("MC_GLOBUS_CC_USER environment variable not set")
+	}
+
+	if globusCCToken = os.Getenv("MC_GLOBUS_CC_TOKEN"); globusCCToken == "" {
+		log.Fatalf("MC_GLOBUS_CC_TOKEN environment variable not set")
+	}
+
+	if globusEndpointID = os.Getenv("MC_GLOBUS_ENDPOINT_ID"); globusEndpointID == "" {
+		log.Fatalf("MC_GLOBUS_ENDPOINT_ID environment variable not set")
+	}
+
+	if globusRoot = os.Getenv("MC_GLOBUS_ROOT"); globusRoot == "" {
+		log.Fatalf("MC_GLOBUS_ROOT environment variable not set")
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.

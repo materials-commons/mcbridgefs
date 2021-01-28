@@ -3,6 +3,7 @@ package mcglobusfs
 import (
 	"context"
 	"fmt"
+	"github.com/materials-commons/gomcdb/mcmodel"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/materials-commons/mcglobusfs/pkg/globusapi"
+	"github.com/materials-commons/goglobus"
 
 	"github.com/apex/log"
 	"gorm.io/gorm"
@@ -19,10 +20,10 @@ import (
 type GlobusRequestMonitor struct {
 	db           *gorm.DB
 	ctx          context.Context
-	globusClient *globusapi.Client
+	globusClient *globus.Client
 }
 
-func NewGlobusRequestMonitor(db *gorm.DB, ctx context.Context, globusClient *globusapi.Client) *GlobusRequestMonitor {
+func NewGlobusRequestMonitor(db *gorm.DB, ctx context.Context, globusClient *globus.Client) *GlobusRequestMonitor {
 	return &GlobusRequestMonitor{db: db, ctx: ctx, globusClient: globusClient}
 }
 
@@ -53,8 +54,8 @@ func (m *GlobusRequestMonitor) startNewRequests() {
 	}
 }
 
-func (m *GlobusRequestMonitor) retrieveNewRequests() []GlobusRequest {
-	var requests []GlobusRequest
+func (m *GlobusRequestMonitor) retrieveNewRequests() []mcmodel.GlobusRequest {
+	var requests []mcmodel.GlobusRequest
 	result := m.db.Where("state = ?", "new").Find(&requests)
 	if result.Error != nil {
 		log.Warnf("No entries found")
@@ -63,7 +64,7 @@ func (m *GlobusRequestMonitor) retrieveNewRequests() []GlobusRequest {
 	return requests
 }
 
-func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, globusClient *globusapi.Client) {
+func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *mcmodel.GlobusRequest, globusClient *globus.Client) {
 	mountPath := filepath.Join(os.Getenv("MC_GLOBUS_BRIDGE_ROOT"), request.UUID)
 	if err := os.MkdirAll(mountPath, 0777); err != nil {
 		log.Errorf("Unable to create root mount point (%s) for request %d: %s", mountPath, request.ID, err)
@@ -91,7 +92,7 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 		log.Errorf("Error deleting ACL for request %d: %s", request.ID, err)
 	}
 
-	result := db.Model(&request).Updates(GlobusRequest{Pid: 0, State: "done"})
+	result := db.Model(&request).Updates(mcmodel.GlobusRequest{Pid: 0, State: "done"})
 	if result.Error != nil {
 		log.Errorf("Unable to change request %d to done state: %s", request.ID, result.Error)
 	}
@@ -101,7 +102,7 @@ func handleBridgeMountAndRequestCompletion(db *gorm.DB, request *GlobusRequest, 
 	}
 }
 
-func setupGlobusMountPoint(db *gorm.DB, request *GlobusRequest, globusClient *globusapi.Client) error {
+func setupGlobusMountPoint(db *gorm.DB, request *mcmodel.GlobusRequest, globusClient *globus.Client) error {
 	identities, err := globusClient.GetIdentities([]string{request.Owner.GlobusUser})
 	if err != nil {
 		return errors.WithMessage(err, fmt.Sprintf("Unable to retrieve globus user from globus api %s", request.Owner.GlobusUser))
@@ -113,8 +114,8 @@ func setupGlobusMountPoint(db *gorm.DB, request *GlobusRequest, globusClient *gl
 
 	path := makeGlobusPath(request.UUID)
 
-	rule := globusapi.EndpointACLRule{
-		PrincipalType: globusapi.ACLPrincipalTypeIdentity,
+	rule := globus.EndpointACLRule{
+		PrincipalType: globus.ACLPrincipalTypeIdentity,
 		EndpointID:    globusEndpointID,
 		Path:          path,
 		IdentityID:    globusIdentityID,
@@ -127,7 +128,7 @@ func setupGlobusMountPoint(db *gorm.DB, request *GlobusRequest, globusClient *gl
 		return errors.WithMessage(err, msg)
 	}
 
-	return db.Model(request).Updates(GlobusRequest{
+	return db.Model(request).Updates(mcmodel.GlobusRequest{
 		GlobusAclID:      aclRes.AccessID,
 		GlobusIdentityID: globusIdentityID,
 	}).Error
@@ -153,10 +154,10 @@ func (m *GlobusRequestMonitor) processFinishedRequests() {
 	}
 }
 
-func (m *GlobusRequestMonitor) retrieveFinishedRequests() []GlobusRequest {
+func (m *GlobusRequestMonitor) retrieveFinishedRequests() []mcmodel.GlobusRequest {
 	return nil
 }
 
-func handleFinishedRequest(g *GlobusRequest) {
+func handleFinishedRequest(g *mcmodel.GlobusRequest) {
 
 }

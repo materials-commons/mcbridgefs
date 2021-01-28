@@ -8,8 +8,8 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/hashicorp/go-uuid"
-	"github.com/materials-commons/mcglobusfs/pkg/fs/bridgefs"
-	mcglobusfs2 "github.com/materials-commons/mcglobusfs/pkg/mcglobusfs"
+	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
 	"gorm.io/gorm"
 	"hash/fnv"
 	"os"
@@ -26,8 +26,8 @@ type Node struct {
 	db              *gorm.DB
 	projectID       int
 	globusRequestID int
-	file            *mcglobusfs2.MCFile
-	newFile         *mcglobusfs2.MCFile
+	file            *mcmodel.File
+	newFile         *mcmodel.File
 	mcfsRoot        string
 	*bridgefs.BridgeNode
 }
@@ -82,7 +82,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 	//fmt.Println("Readdir looking up files for directory: ", dir.ID)
 
-	var files []mcglobusfs2.MCFile
+	var files []mcmodel.File
 	err = n.db.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
 		Where("current = true").
@@ -93,13 +93,13 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	}
 
 	// Get files that have been uploaded
-	var globusUploadedFiles []mcglobusfs2.GlobusRequestFile
+	var globusUploadedFiles []mcmodel.GlobusRequestFile
 	results := n.db.Preload("File").
 		Where("directory_id = ?", dir.ID).
 		Where("globus_request_id = ?", n.globusRequestID).
 		Find(&globusUploadedFiles)
 
-	filesByName := make(map[string]*mcglobusfs2.MCFile)
+	filesByName := make(map[string]*mcmodel.File)
 	if results.Error == nil && len(globusUploadedFiles) != 0 {
 		// convert the files into a hashtable by name
 		for _, requestFile := range globusUploadedFiles {
@@ -181,7 +181,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 		return nil, syscall.ENOENT
 	}
 
-	var f mcglobusfs2.MCFile
+	var f mcmodel.File
 	err = n.db.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
 		Where("name = ?", name).
@@ -210,8 +210,8 @@ func (n *Node) path(name string) string {
 	return filepath.Join("/", n.GetRealPath(name))
 }
 
-func (n *Node) getMCDir(name string) (*mcglobusfs2.MCFile, error) {
-	var file mcglobusfs2.MCFile
+func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
+	var file mcmodel.File
 	path := filepath.Join("/", n.Path(n.Root()), name)
 	//fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, path)
 	err := n.db.Preload("Directory").
@@ -228,7 +228,7 @@ func (n *Node) getMCDir(name string) (*mcglobusfs2.MCFile, error) {
 	return &file, nil
 }
 
-func (n *Node) getMCFile(name string) (*mcglobusfs2.MCFile, error) {
+func (n *Node) getMCFile(name string) (*mcmodel.File, error) {
 	//var file MCFile
 	//path := filepath.Join("/", n.Path(n.Root()), name)
 	//err := n.db.Preload("Directory").
@@ -237,8 +237,8 @@ func (n *Node) getMCFile(name string) (*mcglobusfs2.MCFile, error) {
 	return nil, nil
 }
 
-func (n *Node) getMCFilesInDir(directoryID int) ([]mcglobusfs2.MCFile, error) {
-	var files []mcglobusfs2.MCFile
+func (n *Node) getMCFilesInDir(directoryID int) ([]mcmodel.File, error) {
+	var files []mcmodel.File
 	err := n.db.Where("directory_id = ?", directoryID).
 		Where("current = true").
 		Find(&files).Error
@@ -353,11 +353,11 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	return syscall.EINVAL
 }
 
-func (n *Node) createNewMCFileVersion() (*mcglobusfs2.MCFile, error) {
+func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	// First check if there is already a version of this file being written to for this
 	// globus upload context.
 	var err error
-	var globusRequestFile mcglobusfs2.GlobusRequestFile
+	var globusRequestFile mcmodel.GlobusRequestFile
 	path := filepath.Join("/", n.Path(n.Root()))
 	err = n.db.Preload("File").
 		Where("path = ?", path).
@@ -370,7 +370,7 @@ func (n *Node) createNewMCFileVersion() (*mcglobusfs2.MCFile, error) {
 
 	// There isn't an existing upload, so create a new one
 
-	newFile := &mcglobusfs2.MCFile{
+	newFile := &mcmodel.File{
 		ProjectID:   n.file.ProjectID,
 		Name:        n.file.Name,
 		DirectoryID: n.file.DirectoryID,
@@ -411,7 +411,7 @@ func (n *Node) createNewMCFileVersion() (*mcglobusfs2.MCFile, error) {
 	}
 
 	// Create a new globus request file entry to account for the new file
-	globusRequestFile = mcglobusfs2.GlobusRequestFile{
+	globusRequestFile = mcmodel.GlobusRequestFile{
 		ProjectID:       n.projectID,
 		OwnerID:         n.file.OwnerID,
 		GlobusRequestID: n.globusRequestID,
@@ -442,7 +442,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 	return syscall.EIO
 }
 
-func (n *Node) getMode(entry *mcglobusfs2.MCFile) uint32 {
+func (n *Node) getMode(entry *mcmodel.File) uint32 {
 	if entry == nil {
 		return 0755 | uint32(syscall.S_IFDIR)
 	}
@@ -454,7 +454,7 @@ func (n *Node) getMode(entry *mcglobusfs2.MCFile) uint32 {
 	return 0644 | uint32(syscall.S_IFREG)
 }
 
-func (n *Node) inodeHash(entry *mcglobusfs2.MCFile) uint64 {
+func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 	if entry == nil {
 		//fmt.Printf("inodeHash entry is nil\n")
 		return 1

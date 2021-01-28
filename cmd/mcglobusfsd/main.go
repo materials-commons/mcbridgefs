@@ -14,7 +14,7 @@
 
 package main
 
-import "github.com/materials-commons/mcglobusfs/cmd/mcglobusfsd/cmd"
+import "github.com/materials-commons/mcbridgefs/cmd/mcglobusfsd/cmd"
 
 func main() {
 	cmd.Execute()

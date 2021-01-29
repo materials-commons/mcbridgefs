@@ -21,7 +21,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/goglobus"
 	"github.com/materials-commons/gomcdb/mcmodel"
-	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
+	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"os"

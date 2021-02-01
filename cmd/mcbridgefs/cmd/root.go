@@ -15,18 +15,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/materials-commons/goglobus"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	mcbridge "github.com/materials-commons/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -73,20 +73,13 @@ to quickly create a Cobra application.`,
 		}
 
 		var (
-			err          error
-			db           *gorm.DB
-			globusClient *globus.Client
+			err error
+			db  *gorm.DB
 		)
 
 		if db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{}); err != nil {
 			log.Fatalf("Failed to open db: %s", err)
 		}
-
-		if globusClient, err = globus.CreateConfidentialClient(globusCCUser, globusCCToken); err != nil {
-			log.Fatalf("Failed to create confidential globus client: %s", err)
-		}
-
-		var _ = globusClient
 
 		var globusRequest mcmodel.GlobusRequest
 
@@ -94,19 +87,27 @@ to quickly create a Cobra application.`,
 			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, err)
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+
 		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestID, mcfsRoot)
 		server := mustMount(args[0], rootNode)
-		go server.listenForUnmount()
+
+		onClose := func() {
+			if err := server.Unmount(); err != nil {
+				log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, server.mountPoint)
+			}
+
+			os.Exit(0)
+		}
+
+		closedRequestMonitor := mcbridge.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
+		closedRequestMonitor.Start()
+
+		go server.listenForUnmount(cancel)
+
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
 		server.Wait()
 	},
-}
-
-// makeGlobusPath constructs the path as Globus expects to see it. Globus needs the path to both
-// start and end with a '/', eg /__globus/abc/.
-func makeGlobusPath(dir string) string {
-	// We need to Sprintf the ending slash because filepath.Join removes the trailing slash.
-	return fmt.Sprintf("%s/", filepath.Join("/", os.Getenv("MC_GLOBUS_ROOT"), dir))
 }
 
 var timeout = 10 * time.Second
@@ -137,11 +138,12 @@ func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
 	}
 }
 
-func (s *Server) listenForUnmount() {
+func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-c
 	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
+	cancelFunc()
 	if err := s.Unmount(); err != nil {
 		log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, s.mountPoint)
 	}

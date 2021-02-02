@@ -20,9 +20,12 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	mcbridge "github.com/materials-commons/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
+	"github.com/mitchellh/go-homedir"
+	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"os"
@@ -30,22 +33,51 @@ import (
 	"syscall"
 	"time"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile          string
-	projectID        int
-	globusRequestID  int
-	dsn              string
-	mcfsRoot         string
-	globusCCUser     string
-	globusCCToken    string
-	globusEndpointID string
-	globusRoot       string
+	cfgFile         string
+	globusRequestID int
+	mcfsDir         string
 )
+
+func init() {
+	cobra.OnInitialize(initConfig)
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
+	rootCmd.PersistentFlags().IntVarP(&globusRequestID, "globus-request-id", "g", -1, "Globus request this mount is associated with")
+
+	mcfsDir = os.Getenv("MCFS_DIR")
+	if mcfsDir == "" {
+		log.Fatalf("MCFS_DIR environment variable not set")
+	}
+}
+
+// initConfig reads in config file and ENV variables if set.
+func initConfig() {
+	if cfgFile != "" {
+		// Use config file from the flag.
+		viper.SetConfigFile(cfgFile)
+	} else {
+		// Find home directory.
+		home, err := homedir.Dir()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		// Search config in home directory with name ".mcbridgefs" (without extension).
+		viper.AddConfigPath(home)
+		viper.SetConfigName(".mcbridgefs")
+	}
+
+	viper.AutomaticEnv() // read in environment variables that match
+
+	// If a config file is found, read it in.
+	if err := viper.ReadInConfig(); err == nil {
+		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	}
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -64,10 +96,6 @@ to quickly create a Cobra application.`,
 			log.Fatalf("No path specified for mount.")
 		}
 
-		if projectID == -1 {
-			log.Fatalf("No project specified.")
-		}
-
 		if globusRequestID == -1 {
 			log.Fatalf("No globus request specified.")
 		}
@@ -77,19 +105,19 @@ to quickly create a Cobra application.`,
 			db  *gorm.DB
 		)
 
-		if db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{}); err != nil {
-			log.Fatalf("Failed to open db: %s", err)
+		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), &gorm.Config{}); err != nil {
+			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		}
 
 		var globusRequest mcmodel.GlobusRequest
 
-		if err := db.Preload("Owner").First(&globusRequest, globusRequestID); err != nil {
-			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, err)
+		if result := db.Preload("Owner").Find(&globusRequest, globusRequestID); result.Error != nil {
+			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, result.Error)
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		rootNode := mcbridgefs.RootNode(db, projectID, globusRequestID, mcfsRoot)
+		rootNode := mcbridgefs.RootNode(db, globusRequest.ProjectID, globusRequestID, mcfsDir)
 		server := mustMount(args[0], rootNode)
 
 		onClose := func() {
@@ -100,6 +128,7 @@ to quickly create a Cobra application.`,
 			os.Exit(0)
 		}
 
+		fmt.Printf("Setup GlobusRequestMonitor with globusRequest: %+v\n", globusRequest)
 		closedRequestMonitor := mcbridge.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
 		closedRequestMonitor.Start()
 
@@ -159,64 +188,5 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
-	}
-}
-
-func init() {
-	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
-	rootCmd.PersistentFlags().IntVarP(&projectID, "project-id", "p", -1, "Project Id to mount")
-	rootCmd.PersistentFlags().IntVarP(&globusRequestID, "globus-request-id", "g", -1, "Globus request this mount is associated with")
-
-	mcfsRoot = os.Getenv("MCFS_ROOT")
-	if mcfsRoot == "" {
-		log.Fatalf("MCFS_ROOT environment variable not set")
-	}
-
-	dsn = os.Getenv("MCDB_CONNECT_STR")
-	if dsn == "" {
-		log.Fatalf("MCDB_CONNECT_STR environment variable not set")
-	}
-
-	if globusCCUser = os.Getenv("MC_GLOBUS_CC_USER"); globusCCUser == "" {
-		log.Fatalf("MC_GLOBUS_CC_USER environment variable not set")
-	}
-
-	if globusCCToken = os.Getenv("MC_GLOBUS_CC_TOKEN"); globusCCToken == "" {
-		log.Fatalf("MC_GLOBUS_CC_TOKEN environment variable not set")
-	}
-
-	if globusEndpointID = os.Getenv("MC_GLOBUS_ENDPOINT_ID"); globusEndpointID == "" {
-		log.Fatalf("MC_GLOBUS_ENDPOINT_ID environment variable not set")
-	}
-
-	if globusRoot = os.Getenv("MC_GLOBUS_ROOT"); globusRoot == "" {
-		log.Fatalf("MC_GLOBUS_ROOT environment variable not set")
-	}
-}
-
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		// Search config in home directory with name ".mcbridgefs" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".mcbridgefs")
-	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
 }

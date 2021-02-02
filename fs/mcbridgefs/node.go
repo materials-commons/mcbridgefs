@@ -85,8 +85,11 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	var files []mcmodel.File
 	err = n.db.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
+		Where("project_id", n.projectID).
 		Where("current = true").
 		Find(&files).Error
+
+	//fmt.Println("  length of files returned for directory =", len(files))
 
 	if err != nil {
 		return nil, syscall.ENOENT
@@ -103,6 +106,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	if results.Error == nil && len(globusUploadedFiles) != 0 {
 		// convert the files into a hashtable by name
 		for _, requestFile := range globusUploadedFiles {
+			//fmt.Println("Adding to filesByName:", requestFile.File.Name)
 			filesByName[requestFile.File.Name] = requestFile.File
 		}
 	}
@@ -126,6 +130,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 			Ino:  n.inodeHash(&fileEntry),
 		}
 
+		//fmt.Println("   To directory listing adding:", fileEntry.Name)
 		filesList = append(filesList, entry)
 	}
 
@@ -137,6 +142,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 			Ino:  n.inodeHash(fileEntry),
 		}
 
+		//fmt.Println("  from filesByName adding:", fileEntry.Name)
 		filesList = append(filesList, entry)
 	}
 
@@ -167,14 +173,14 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// TODO: Get the file from the database and then use that to compute the inode
-	fmt.Println("Lookup: ", filepath.Join("/", n.Path(n.Root()), name))
-	if n.file != nil {
-		fmt.Printf("  Lookup n.file not nil name = %s, size = %d\n", n.file.Name, n.file.Size)
-	}
-
-	if n.newFile != nil {
-		fmt.Printf("  Lookup n.newFile not nil name = %s, size = %d\n", n.newFile.Name, n.newFile.Size)
-	}
+	//fmt.Println("Lookup: ", filepath.Join("/", n.Path(n.Root()), name))
+	//if n.file != nil {
+	//	fmt.Printf("  Lookup n.file not nil name = %s, size = %d\n", n.file.Name, n.file.Size)
+	//}
+	//
+	//if n.newFile != nil {
+	//	fmt.Printf("  Lookup n.newFile not nil name = %s, size = %d\n", n.newFile.Name, n.newFile.Size)
+	//}
 
 	dir, err := n.getMCDir("")
 	if err != nil {

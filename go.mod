@@ -7,7 +7,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.0.3
 	github.com/hashicorp/go-uuid v1.0.1
 	github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0
-	github.com/materials-commons/gomcdb v0.0.0-20210127200722-b38d33783359
+	github.com/materials-commons/gomcdb v0.0.0-20210202183031-129ae91e0e2c
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.1.1

@@ -46,7 +46,6 @@ func init() {
 }
 
 func RootNode(db *gorm.DB, projectID, globusRequestID int, rootPath string) *Node {
-	fmt.Println("creating rootpath:", rootPath)
 	bridgeRoot, err := bridgefs.NewBridgeRoot(rootPath, nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create root node: %s", err)
@@ -172,6 +171,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 }
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("Lookup:", name)
 	// TODO: Get the file from the database and then use that to compute the inode
 	//fmt.Println("Lookup: ", filepath.Join("/", n.Path(n.Root()), name))
 	//if n.file != nil {
@@ -182,18 +182,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	//	fmt.Printf("  Lookup n.newFile not nil name = %s, size = %d\n", n.newFile.Name, n.newFile.Size)
 	//}
 
-	dir, err := n.getMCDir("")
-	if err != nil {
-		return nil, syscall.ENOENT
-	}
-
-	var f mcmodel.File
-	err = n.db.Preload("Directory").
-		Where("directory_id = ?", dir.ID).
-		Where("name = ?", name).
-		Where("current = ?", true).
-		First(&f).Error
-
+	f, err := n.lookupEntry(name)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -208,8 +197,39 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	out.SetTimes(&now, &now, &now)
 
 	node := n.newNode()
-	node.file = &f
-	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(&f), Ino: n.inodeHash(&f)}), fs.OK
+	node.file = f
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), fs.OK
+}
+
+func (n *Node) lookupEntry(name string) (*mcmodel.File, error) {
+	dir, err := n.getMCDir("")
+	if err != nil {
+		return nil, err
+	}
+
+	// First check if there is a new file being uploaded for this entry. If that is the case
+	// then return that file information.
+	var gf mcmodel.GlobusRequestFile
+	err = n.db.Preload("File.Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("name = ?", name).
+		First(&gf).Error
+
+	if err == nil {
+		// Found a version of the file that is being uploaded so return it
+		// TODO: Do we need to stat the entry to get the current size?
+		return gf.File, nil
+	}
+
+	// If we are here then there is not a new version of the file being written, so look up existing
+	var f mcmodel.File
+	err = n.db.Preload("Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("name = ?", name).
+		Where("current = ?", true).
+		First(&f).Error
+
+	return &f, err
 }
 
 func (n *Node) path(name string) string {
@@ -306,7 +326,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		fmt.Printf("syscall.Open failed, err = %s\n", err)
 		return nil, 0, fs.ToErrno(err)
 	}
-	fhandle := bridgefs.NewBridgeFileHandle(fd)
+	fhandle := NewFileHandle(fd)
 	return fhandle, 0, fs.OK
 }
 
@@ -364,9 +384,9 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	// globus upload context.
 	var err error
 	var globusRequestFile mcmodel.GlobusRequestFile
-	path := filepath.Join("/", n.Path(n.Root()))
 	err = n.db.Preload("File").
-		Where("path = ?", path).
+		Where("name = ?", n.file.Name).
+		Where("directory_id = ?", n.file.DirectoryID).
 		Where("globus_request_id = ?", n.globusRequestID).
 		First(&globusRequestFile).Error
 
@@ -421,7 +441,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		ProjectID:       n.projectID,
 		OwnerID:         n.file.OwnerID,
 		GlobusRequestID: n.globusRequestID,
-		Path:            path,
+		Name:            n.file.Name,
 		FileID:          newFile.ID,
 	}
 

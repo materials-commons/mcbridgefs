@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"os"
 	"os/signal"
 	"syscall"
@@ -105,7 +106,11 @@ to quickly create a Cobra application.`,
 			db  *gorm.DB
 		)
 
-		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), &gorm.Config{}); err != nil {
+		gormConfig := &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Silent),
+		}
+
+		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		}
 
@@ -128,7 +133,6 @@ to quickly create a Cobra application.`,
 			os.Exit(0)
 		}
 
-		fmt.Printf("Setup GlobusRequestMonitor with globusRequest: %+v\n", globusRequest)
 		closedRequestMonitor := mcbridge.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
 		closedRequestMonitor.Start()
 

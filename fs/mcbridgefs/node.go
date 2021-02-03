@@ -96,7 +96,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 	// Get files that have been uploaded
 	var globusUploadedFiles []mcmodel.GlobusRequestFile
-	results := n.db.Preload("File").
+	results := n.db.Preload("File.Directory").
 		Where("directory_id = ?", dir.ID).
 		Where("globus_request_id = ?", n.globusRequestID).
 		Find(&globusUploadedFiles)
@@ -286,7 +286,28 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	fmt.Println("Node Create: ", name)
-	return nil, nil, 0, syscall.EIO
+	f, err := n.createNewMCFile(name)
+	if err != nil {
+		return nil, nil, 0, syscall.EIO
+	}
+
+	flags = flags &^ syscall.O_APPEND
+	fd, err := syscall.Open(f.ToPath(n.mcfsRoot), int(flags)|os.O_CREATE, mode)
+	if err != nil {
+		// TODO - Remove newly create file version in db
+		return nil, nil, 0, syscall.EIO
+	}
+	statInfo := syscall.Stat_t{}
+	if err := syscall.Fstat(fd, &statInfo); err != nil {
+		// TODO - Remove newly created file version in db
+		syscall.Close(fd)
+		return nil, nil, 0, fs.ToErrno(err)
+	}
+	// Is this sequence correct?
+	node := n.newNode()
+	node.file = f
+	out.FromStat(&statInfo)
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd), 0, fs.OK
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
@@ -461,6 +482,71 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 
 	fmt.Printf("createNewMCFileVersion: %+v\n", newFile)
 
+	return newFile, nil
+}
+
+func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
+	dir, err := n.getMCDir("")
+	if err != nil {
+		return nil, err
+	}
+
+	newFile := &mcmodel.File{
+		ProjectID:   n.projectID,
+		Name:        name,
+		DirectoryID: dir.ID,
+		Size:        0,
+		Checksum:    "",
+		MimeType:    "unknown", // TODO: determine mime type from extension
+		OwnerID:     130,       // TODO: Don't hard code this
+		Current:     false,
+	}
+
+	if newFile.UUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
+	// Try to make the directory path where the file will go
+	if err := os.MkdirAll(newFile.ToDirPath(n.mcfsRoot), 0755); err != nil {
+		fmt.Printf("os.MkdirAll failed (%s): %s\n", newFile.ToDirPath(n.mcfsRoot), err)
+		return nil, err
+	}
+
+	result := n.db.Create(newFile)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if result.RowsAffected != 1 {
+		// TODO: Fix this error
+		return nil, errors.New("incorrect rows affected")
+	}
+
+	globusRequestFile := mcmodel.GlobusRequestFile{
+		ProjectID:       n.projectID,
+		OwnerID:         130,
+		DirectoryID:     dir.ID,
+		GlobusRequestID: n.globusRequestID,
+		Name:            name,
+		FileID:          newFile.ID,
+	}
+
+	if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
+	result = n.db.Create(&globusRequestFile)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if result.RowsAffected != 1 {
+		// TODO: Fix this error
+		return nil, errors.New("incorrect rows affected")
+	}
+
+	newFile.Directory = dir
 	return newFile, nil
 }
 

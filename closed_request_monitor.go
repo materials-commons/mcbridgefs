@@ -3,7 +3,6 @@ package mcbridgefs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"time"
 
@@ -19,17 +18,14 @@ type ClosedGlobusRequestMonitor struct {
 }
 
 func NewClosedGlobusRequestMonitor(db *gorm.DB, ctx context.Context, globusRequest mcmodel.GlobusRequest, handleFn func()) *ClosedGlobusRequestMonitor {
-	fmt.Printf("NewClosedGlobusRequestMonitor: %+v\n", globusRequest)
 	return &ClosedGlobusRequestMonitor{db: db, ctx: ctx, globusRequest: globusRequest, handleClosedRequestFn: handleFn}
 }
 
 func (m *ClosedGlobusRequestMonitor) Start() {
-	fmt.Printf("  Start: %+v\n", m.globusRequest)
-	go m.monitorAndProcessGlobusRequests()
+	go m.monitorGlobusRequestState()
 }
 
-func (m *ClosedGlobusRequestMonitor) monitorAndProcessGlobusRequests() {
-	fmt.Printf("  monitorAndProcessGlobusRequests: %+v\n", m.globusRequest)
+func (m *ClosedGlobusRequestMonitor) monitorGlobusRequestState() {
 	for {
 		if m.handledClosedOrDeletedRequest() {
 			break
@@ -44,36 +40,28 @@ func (m *ClosedGlobusRequestMonitor) monitorAndProcessGlobusRequests() {
 }
 
 func (m *ClosedGlobusRequestMonitor) handledClosedOrDeletedRequest() bool {
-	fmt.Println("handleClosedOrDeletedRequest:", m.globusRequest.ID)
 	var request mcmodel.GlobusRequest
 	result := m.db.Find(&request, m.globusRequest.ID)
-	fmt.Printf("%+v\n", request)
 	switch {
 	case errors.Is(result.Error, gorm.ErrRecordNotFound):
 		// Request no longer exists so break out of monitoring
-		fmt.Println(" 1")
 		return true
 	case result.Error != nil:
 		// (Hopefully) transient error on database
-		fmt.Println(" 2")
 		log.Warnf("Error querying database: %s", result.Error)
 		return false
 	case request.State == "closed":
 		// Request state marked as closed, perform cleanup
-		fmt.Println(" 3")
 		m.handleClosedRequestFn()
 		return true
 	case request.State == "unmounted":
 		// This state should never occur
-		fmt.Println(" 4")
 		log.Errorf("Monitor saw impossible state 'unmounted', shutting down bridge...")
 		return true
 	case request.State == "loading":
-		fmt.Println(" 5")
 		log.Errorf("Monitor saw impossible state 'loading', shutting down bridge...")
 		return true
 	default:
-		fmt.Println(" 6")
 		// If we are here then we found the request, but its state is still open and active
 		return false
 	}

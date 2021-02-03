@@ -15,8 +15,8 @@ import (
 )
 
 func (f *BridgeFileHandle) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	err := syscall.Fallocate(f.fd, mode, int64(off), int64(sz))
 	if err != nil {
 		return fs.ToErrno(err)

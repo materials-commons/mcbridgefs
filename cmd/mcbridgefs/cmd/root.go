@@ -122,7 +122,11 @@ to quickly create a Cobra application.`,
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		rootNode := mcbridgefs.RootNode(db, globusRequest.ProjectID, globusRequestID, mcfsDir)
+		mcbridgefs.GlobusRequest = globusRequest
+		mcbridgefs.MCFSRoot = mcfsDir
+		mcbridgefs.DB = db
+
+		rootNode := mcbridgefs.RootNode()
 		server := mustMount(args[0], rootNode)
 
 		onClose := func() {

@@ -656,7 +656,46 @@ func getMimeType(name string) string {
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	fmt.Printf("Rename: %s/%s to %s/%s\n", n.Path(n.Root()), name, newParent.EmbeddedInode().Path(n.Root()), newName)
-	return syscall.EIO
+	fromPath := filepath.Join("/", n.Path(n.Root()))
+	toPath := filepath.Join("/", newParent.EmbeddedInode().Path(n.Root()))
+
+	dir, err := n.getMCDir("")
+	if err != nil {
+		return syscall.ENOENT
+	}
+
+	var f mcmodel.File
+	err = DB.Preload("Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("project_id = ?", GlobusRequest.ProjectID).
+		Where("name = ?", name).
+		Where("current = ?", true).
+		Find(&f).Error
+
+	switch {
+	case err != nil:
+		return syscall.ENOENT
+	case f.IsDir():
+		return n.renameDir(fromPath, toPath, name, newName, f)
+	default:
+		// f is a file
+		return n.renameFile(fromPath, toPath, name, newName, f)
+	}
+}
+
+func (n *Node) renameDir(fromPath, toPath, name, toName string, f mcmodel.File) syscall.Errno {
+	if fromPath == toPath {
+		// not being moved to another directory. Just rename directory and all descendant directory
+		// paths
+	}
+	return fs.OK
+}
+
+func (n *Node) renameFile(fromPath, toPath, name, toName string, f mcmodel.File) syscall.Errno {
+	if fromPath == toPath {
+		// not being moved to another directory. Just rename file and all its previous versions
+	}
+	return fs.OK
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {

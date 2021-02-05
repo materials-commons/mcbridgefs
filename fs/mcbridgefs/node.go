@@ -304,7 +304,7 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	node := n.newNode()
 	node.file = f
 	out.FromStat(&statInfo)
-	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd), 0, fs.OK
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd, flags), 0, fs.OK
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
@@ -320,6 +320,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 
 	switch flags & syscall.O_ACCMODE {
 	case syscall.O_RDONLY:
+		newFile = getFromOpenedFiles(path)
 		fmt.Println("    Open flags O_RDONLY")
 	case syscall.O_WRONLY:
 		newFile = getFromOpenedFiles(path)
@@ -332,11 +333,19 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
+		flags = flags &^ syscall.O_APPEND
 		fmt.Println("    Open flags O_WRONLY")
 	case syscall.O_RDWR:
-		// If we are here then for now return an error. Need to figure out
-		// how this is handled when opening an existing file vs creating
-		// a new file.
+		newFile = getFromOpenedFiles(path)
+		if newFile == nil {
+			newFile, err = n.createNewMCFileVersion()
+			if err != nil {
+				// TODO: What error should be returned?
+				return nil, 0, syscall.EIO
+			}
+			openedFilesTracker.Store(path, newFile)
+		}
+		flags = flags &^ syscall.O_APPEND
 		fmt.Println("    Open flags O_RDWR")
 	default:
 		fmt.Println("    Open flags Invalid")
@@ -352,7 +361,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		fmt.Printf("syscall.Open failed, err = %s\n", err)
 		return nil, 0, fs.ToErrno(err)
 	}
-	fhandle := NewFileHandle(fd)
+	fhandle := NewFileHandle(fd, flags)
 	return fhandle, 0, fs.OK
 }
 
@@ -380,6 +389,12 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		fmt.Println("   Handle is BridgeFileHandle")
 		if err := bridgeFH.Release(ctx); err != fs.OK {
 			return err
+		}
+
+		// If read only then no need to update size or current flag
+		fh := bridgeFH.(*FileHandle)
+		if fh.Flags&syscall.O_ACCMODE == syscall.O_RDONLY {
+			return fs.OK
 		}
 
 		fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
@@ -423,17 +438,23 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	// First check if there is already a version of this file being written to for this
 	// globus upload context.
-	var err error
-	var globusRequestFile mcmodel.GlobusRequestFile
-	err = DB.Preload("File").
-		Where("name = ?", n.file.Name).
-		Where("directory_id = ?", n.file.DirectoryID).
-		Where("globus_request_id = ?", GlobusRequest.ID).
-		First(&globusRequestFile).Error
 
-	if err != nil {
-		return globusRequestFile.File, nil
+	existing := getFromOpenedFiles(filepath.Join("/", n.Path(n.Root()), n.file.Name))
+	if existing != nil {
+		return existing, nil
 	}
+
+	var err error
+	//var globusRequestFile mcmodel.GlobusRequestFile
+	//err = DB.Preload("File").
+	//	Where("name = ?", n.file.Name).
+	//	Where("directory_id = ?", n.file.DirectoryID).
+	//	Where("globus_request_id = ?", GlobusRequest.ID).
+	//	First(&globusRequestFile).Error
+	//
+	//if err != nil {
+	//	return globusRequestFile.File, nil
+	//}
 
 	// There isn't an existing upload, so create a new one
 
@@ -478,7 +499,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	}
 
 	// Create a new globus request file entry to account for the new file
-	globusRequestFile = mcmodel.GlobusRequestFile{
+	globusRequestFile := mcmodel.GlobusRequestFile{
 		ProjectID:       GlobusRequest.ProjectID,
 		OwnerID:         n.file.OwnerID,
 		GlobusRequestID: GlobusRequest.ID,

@@ -9,6 +9,7 @@ import (
 
 type FileHandle struct {
 	*bridgefs.BridgeFileHandle
+	Flags uint32
 }
 
 var _ = (fs.FileHandle)((*FileHandle)(nil))
@@ -25,6 +26,6 @@ var _ = (fs.FileFsyncer)((*FileHandle)(nil))
 var _ = (fs.FileSetattrer)((*FileHandle)(nil))
 var _ = (fs.FileAllocater)((*FileHandle)(nil))
 
-func NewFileHandle(fd int) fs.FileHandle {
-	return &FileHandle{bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle)}
+func NewFileHandle(fd int, flags uint32) fs.FileHandle {
+	return &FileHandle{bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle), flags}
 }

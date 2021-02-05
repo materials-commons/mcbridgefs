@@ -12,10 +12,12 @@ import (
 	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
 	"gorm.io/gorm"
 	"hash/fnv"
+	"mime"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -273,7 +275,58 @@ func (n *Node) getMCFilesInDir(directoryID int) ([]mcmodel.File, error) {
 
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fmt.Printf("Mkdir %s/%s\n", n.Path(n.Root()), name)
-	return nil, syscall.EINVAL
+	path := filepath.Join("/", n.Path(n.Root()), name)
+	var dir mcmodel.File
+
+	parent, err := n.getMCDir("")
+	if err != nil {
+		fmt.Println("   Could not find parent")
+		return nil, syscall.EINVAL
+	}
+
+	fmt.Printf("   parent = %+v\n", parent)
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		err := tx.Where("path = ", path).
+			Where("project_id = ", GlobusRequest.ProjectID).
+			Find(&dir).Error
+		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+			// directory already exists no need to create
+			fmt.Println("   Directory already exists")
+			return nil
+		}
+		dir = mcmodel.File{
+			OwnerID:              GlobusRequest.OwnerID,
+			MimeType:             "directory",
+			MediaTypeDescription: "directory",
+			DirectoryID:          parent.ID,
+			Current:              true,
+			Path:                 path,
+			ProjectID:            GlobusRequest.ProjectID,
+			Name:                 name,
+		}
+
+		if dir.UUID, err = uuid.GenerateUUID(); err != nil {
+			return err
+		}
+
+		return tx.Create(&dir).Error
+	})
+
+	if err != nil {
+		fmt.Println("   Transaction returned err =", err)
+		return nil, syscall.EINVAL
+	}
+
+	out.Uid = uid
+	out.Gid = gid
+
+	now := time.Now()
+	out.SetTimes(&now, &now, &now)
+
+	node := n.newNode()
+	node.file = &dir
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(&dir), Ino: n.inodeHash(&dir)}), fs.OK
 }
 
 func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
@@ -538,8 +591,8 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		DirectoryID: dir.ID,
 		Size:        0,
 		Checksum:    "",
-		MimeType:    "unknown", // TODO: determine mime type from extension
-		OwnerID:     130,       // TODO: Don't hard code this
+		MimeType:    getMimeType(name),
+		OwnerID:     GlobusRequest.OwnerID,
 		Current:     false,
 	}
 
@@ -566,7 +619,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 
 	globusRequestFile := mcmodel.GlobusRequestFile{
 		ProjectID:       GlobusRequest.ProjectID,
-		OwnerID:         130,
+		OwnerID:         GlobusRequest.OwnerID,
 		DirectoryID:     dir.ID,
 		GlobusRequestID: GlobusRequest.ID,
 		Name:            name,
@@ -589,6 +642,16 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 
 	newFile.Directory = dir
 	return newFile, nil
+}
+
+func getMimeType(name string) string {
+	mimeType := mime.TypeByExtension(filepath.Ext(name))
+	semicolon := strings.Index(mimeType, ";")
+	if semicolon == -1 {
+		return strings.TrimSpace(mimeType)
+	}
+
+	return strings.TrimSpace(mimeType[:semicolon])
 }
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {

@@ -341,6 +341,8 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 		return nil, nil, 0, syscall.EIO
 	}
 
+	path := filepath.Join("/", n.Path(n.Root()), name)
+	openedFilesTracker.Store(path, f)
 	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(f.ToPath(MCFSRoot), int(flags)|os.O_CREATE, mode)
 	if err != nil {
@@ -373,22 +375,25 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 
 	switch flags & syscall.O_ACCMODE {
 	case syscall.O_RDONLY:
-		newFile = getFromOpenedFiles(path)
 		fmt.Println("    Open flags O_RDONLY")
+		newFile = getFromOpenedFiles(path)
 	case syscall.O_WRONLY:
+		fmt.Println("    Open flags O_WRONLY")
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
 			newFile, err = n.createNewMCFileVersion()
 			if err != nil {
 				// TODO: What error should be returned?
+				fmt.Println("       createNewMCFileVersion() failed:", err)
 				return nil, 0, syscall.EIO
 			}
+			fmt.Printf("Storing into opendFilesTracker '%s'\n", path)
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND
-		fmt.Println("    Open flags O_WRONLY")
 	case syscall.O_RDWR:
+		fmt.Println("    Open flags O_RDWR")
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
 			newFile, err = n.createNewMCFileVersion()
@@ -396,10 +401,10 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				// TODO: What error should be returned?
 				return nil, 0, syscall.EIO
 			}
+			fmt.Printf("Storing into opendFilesTracker '%s'\n", path)
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_APPEND
-		fmt.Println("    Open flags O_RDWR")
 	default:
 		fmt.Println("    Open flags Invalid")
 		return
@@ -421,7 +426,8 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	fmt.Println("Node Setattr")
 	path := n.file.ToPath(MCFSRoot)
-	newFile := getFromOpenedFiles(path)
+	fpath := filepath.Join("/", n.Path(n.Root()))
+	newFile := getFromOpenedFiles(fpath)
 	if newFile != nil {
 		path = newFile.ToPath(MCFSRoot)
 	}
@@ -453,7 +459,8 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
 		path := n.file.ToPath(MCFSRoot)
 		mcToUpdate := n.file
-		newFile := getFromOpenedFiles(path)
+		fpath := filepath.Join("/", n.Path(n.Root()))
+		newFile := getFromOpenedFiles(fpath)
 		if newFile != nil {
 			path = newFile.ToPath(MCFSRoot)
 			mcToUpdate = newFile
@@ -494,6 +501,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 
 	existing := getFromOpenedFiles(filepath.Join("/", n.Path(n.Root()), n.file.Name))
 	if existing != nil {
+		fmt.Println("  createNewMCFileVersion found previously open - returning it")
 		return existing, nil
 	}
 
@@ -557,6 +565,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		OwnerID:         n.file.OwnerID,
 		GlobusRequestID: GlobusRequest.ID,
 		Name:            n.file.Name,
+		DirectoryID:     n.file.DirectoryID,
 		FileID:          newFile.ID,
 	}
 
@@ -728,10 +737,13 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 }
 
 func getFromOpenedFiles(path string) *mcmodel.File {
+	fmt.Printf("getFromOpenedFiles '%s'\n", path)
 	val, _ := openedFilesTracker.Load(path)
 	if val != nil {
+		fmt.Println("   getFromOpenedFiles found path")
 		return val.(*mcmodel.File)
 	}
 
+	fmt.Println("   getFromOpenedFiles DID NOT find path")
 	return nil
 }

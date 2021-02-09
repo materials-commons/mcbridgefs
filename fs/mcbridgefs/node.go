@@ -76,15 +76,10 @@ func (n *Node) newNode() *Node {
 var _ = (fs.NodeReaddirer)((*Node)(nil))
 
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	//readdirPath := filepath.Join("/", n.Path(n.Root()))
-	//fmt.Printf("Readdir: %s\n", readdirPath)
 	dir, err := n.getMCDir("")
 	if err != nil {
-		//fmt.Printf("   (%s) failed finding directory: %s\n", readdirPath, err)
 		return nil, syscall.ENOENT
 	}
-
-	//fmt.Println("Readdir looking up files for directory: ", dir.ID)
 
 	var files []mcmodel.File
 	err = DB.Preload("Directory").
@@ -92,8 +87,6 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		Where("project_id", GlobusRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
-
-	//fmt.Println("  length of files returned for directory =", len(files))
 
 	if err != nil {
 		return nil, syscall.ENOENT
@@ -110,7 +103,6 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	if results.Error == nil && len(globusUploadedFiles) != 0 {
 		// convert the files into a hashtable by name
 		for _, requestFile := range globusUploadedFiles {
-			//fmt.Println("Adding to filesByName:", requestFile.File.Name)
 			filesByName[requestFile.File.Name] = requestFile.File
 		}
 	}
@@ -134,7 +126,6 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 			Ino:  n.inodeHash(&fileEntry),
 		}
 
-		//fmt.Println("   To directory listing adding:", fileEntry.Name)
 		filesList = append(filesList, entry)
 	}
 
@@ -146,7 +137,6 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 			Ino:  n.inodeHash(fileEntry),
 		}
 
-		//fmt.Println("  from filesByName adding:", fileEntry.Name)
 		filesList = append(filesList, entry)
 	}
 
@@ -160,7 +150,6 @@ func (n *Node) Opendir(ctx context.Context) syscall.Errno {
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	//fmt.Printf("Node Getattr: %s\n", filepath.Join("/", n.Path(n.Root())))
 	if n.file != nil {
-		//fmt.Println("    file for Getattr is not nil")
 		if n.file.IsFile() {
 			out.Size = n.file.Size
 		}
@@ -178,14 +167,6 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fmt.Println("Lookup:", name)
 	// TODO: Get the file from the database and then use that to compute the inode
-	//fmt.Println("Lookup: ", filepath.Join("/", n.Path(n.Root()), name))
-	//if n.file != nil {
-	//	fmt.Printf("  Lookup n.file not nil name = %s, size = %d\n", n.file.Name, n.file.Size)
-	//}
-	//
-	//if n.newFile != nil {
-	//	fmt.Printf("  Lookup n.newFile not nil name = %s, size = %d\n", n.newFile.Name, n.newFile.Size)
-	//}
 
 	f, err := n.lookupEntry(name)
 	if err != nil {
@@ -244,7 +225,6 @@ func (n *Node) path(name string) string {
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	var file mcmodel.File
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	//fmt.Printf("getMCDir projectID = %d path = %s\n", n.projectID, path)
 	err := DB.Preload("Directory").
 		Where("project_id = ?", GlobusRequest.ProjectID).
 		Where("path = ?", path).
@@ -257,15 +237,6 @@ func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 
 	//fmt.Printf("   (%s) returning: %+v\n", path, file)
 	return &file, nil
-}
-
-func (n *Node) getMCFile(name string) (*mcmodel.File, error) {
-	//var file MCFile
-	//path := filepath.Join("/", n.Path(n.Root()), name)
-	//err := n.db.Preload("Directory").
-	//	Where("project_id = ?", n.projectID).
-	//	Where("current = true")
-	return nil, nil
 }
 
 func (n *Node) getMCFilesInDir(directoryID int) ([]mcmodel.File, error) {
@@ -382,17 +353,11 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		newFile *mcmodel.File
 	)
 	path := filepath.Join("/", n.Path(n.Root()))
-	//fmt.Printf("Node Open flags = %d, path = %s\n", flags, filepath.Join("/", n.Path(n.Root())))
-	//if n.file != nil {
-	//	fmt.Println("   Node Open file != nil, realpath = ", n.file.ToPath(MCFSRoot))
-	//}
 
 	switch flags & syscall.O_ACCMODE {
 	case syscall.O_RDONLY:
-		fmt.Println("    Open flags O_RDONLY")
 		newFile = getFromOpenedFiles(path)
 	case syscall.O_WRONLY:
-		fmt.Println("    Open flags O_WRONLY")
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
 			newFile, err = n.createNewMCFileVersion()
@@ -401,13 +366,11 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				fmt.Println("       createNewMCFileVersion() O_WRONLY failed:", err)
 				return nil, 0, syscall.EIO
 			}
-			fmt.Printf("Storing into opendFilesTracker '%s'\n", path)
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND
 	case syscall.O_RDWR:
-		fmt.Println("    Open flags O_RDWR")
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
 			newFile, err = n.createNewMCFileVersion()
@@ -416,7 +379,6 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				fmt.Println("    createNewMCFileVersion() O_RDWR failed:", err)
 				return nil, 0, syscall.EIO
 			}
-			fmt.Printf("Storing into opendFilesTracker '%s'\n", path)
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
@@ -442,31 +404,12 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	fmt.Println("Node Setattr")
-	//path := n.file.ToPath(MCFSRoot)
-	//fpath := filepath.Join("/", n.Path(n.Root()))
-	//newFile := getFromOpenedFiles(fpath)
-	//if newFile != nil {
-	//	path = newFile.ToPath(MCFSRoot)
-	//}
 
 	if sz, ok := in.GetSize(); ok {
-		// if newFile != nil {
-		//    Truncate an existing globus instance file
 		fh := f.(*FileHandle)
 		return fs.ToErrno(syscall.Ftruncate(fh.Fd, int64(sz)))
-		// } else {
-		//    Want to truncate a file but instead need to create a new file... however we already have a handle
-		//    so this case should never occur...
-		// }
 	}
 
-	//fi, err := os.Stat(path)
-	//if err != nil {
-	//	fmt.Printf("os.Stat %s failed: %s\n", path, err)
-	//}
-	//if err == nil {
-	//	fmt.Printf("   Node Setattr stat (%s) size = %d\n", path, fi.Size())
-	//}
 	return fs.OK
 }
 
@@ -478,7 +421,6 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		return syscall.EINVAL
 	}
 
-	//fmt.Println("   Handle is BridgeFileHandle")
 	if err := bridgeFH.Release(ctx); err != fs.OK {
 		return err
 	}
@@ -489,7 +431,6 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		return fs.OK
 	}
 
-	//fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
 	path := n.file.ToPath(MCFSRoot)
 	mcToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
@@ -499,32 +440,24 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		mcToUpdate = newFile
 	}
 
-	fmt.Printf("n.file = %+v\n", n.file)
-	fmt.Printf("mcToUpdate = %+v\n", mcToUpdate)
 	fi, err := os.Stat(path)
 	if err != nil {
 		fmt.Printf("os.Stat %s failed: %s\n", path, err)
 		return fs.ToErrno(err)
 	}
-	//fmt.Printf("   Node Release stat (%s) size = %d\n", path, fi.Size())
-	//var err error
-	err = DB.Transaction(func(tx *gorm.DB) error {
+	err = withTxRetry(func(tx *gorm.DB) error {
 		err := tx.Model(&mcmodel.File{}).
 			Where("directory_id = ?", n.file.DirectoryID).
 			Where("name = ?", n.file.Name).
 			Update("current", false).Error
+
 		if err != nil {
 			return err
 		}
 
-		//fmt.Printf("Starting updates of mcToUpdate\n")
-		err = tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
-		//err = tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(36), Current: true}).Error
-		//fmt.Printf("Finished updates of mcToUpdate: %s\n", err)
-		return err
-	})
+		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
+	}, DB, txRetryCount)
 
-	//fmt.Println("Release after transaction err =", err)
 	fmt.Printf("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fs.ToErrno(err)
 }
@@ -540,19 +473,8 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	}
 
 	var err error
-	//var globusRequestFile mcmodel.GlobusRequestFile
-	//err = DB.Preload("File").
-	//	Where("name = ?", n.file.Name).
-	//	Where("directory_id = ?", n.file.DirectoryID).
-	//	Where("globus_request_id = ?", GlobusRequest.ID).
-	//	First(&globusRequestFile).Error
-	//
-	//if err != nil {
-	//	return globusRequestFile.File, nil
-	//}
 
 	// There isn't an existing upload, so create a new one
-
 	newFile := &mcmodel.File{
 		ProjectID:   n.file.ProjectID,
 		Name:        n.file.Name,
@@ -624,8 +546,6 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("createNewMCFileVersion: %+v\n", newFile)
 
 	return newFile, nil
 }
@@ -790,13 +710,10 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 }
 
 func getFromOpenedFiles(path string) *mcmodel.File {
-	fmt.Printf("getFromOpenedFiles '%s'\n", path)
 	val, _ := openedFilesTracker.Load(path)
 	if val != nil {
-		fmt.Println("   getFromOpenedFiles found path")
 		return val.(*mcmodel.File)
 	}
 
-	fmt.Println("   getFromOpenedFiles DID NOT find path")
 	return nil
 }

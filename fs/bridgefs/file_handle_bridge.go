@@ -20,15 +20,15 @@ import (
 
 // NewBridgeFileHandle creates a FileHandle out of a file descriptor. All
 // operations are implemented. When using the Fd from a *os.File, call
-// syscall.Dup() on the fd, to avoid os.File's finalizer from closing
+// syscall.Dup() on the Fd, to avoid os.File's finalizer from closing
 // the file descriptor.
 func NewBridgeFileHandle(fd int) fs.FileHandle {
-	return &BridgeFileHandle{fd: fd}
+	return &BridgeFileHandle{Fd: fd}
 }
 
 type BridgeFileHandle struct {
 	Mu sync.Mutex
-	fd int
+	Fd int
 }
 
 var _ = (fs.FileHandle)((*BridgeFileHandle)(nil))
@@ -49,7 +49,7 @@ func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res
 	fmt.Println("BridgeFileHandle Read")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	r := fuse.ReadResultFd(uintptr(f.fd), off, len(buf))
+	r := fuse.ReadResultFd(uintptr(f.Fd), off, len(buf))
 	return r, fs.OK
 }
 
@@ -57,7 +57,7 @@ func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 	fmt.Println("BridgeFileHandleWrite")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	n, err := syscall.Pwrite(f.fd, data, off)
+	n, err := syscall.Pwrite(f.Fd, data, off)
 	return uint32(n), fs.ToErrno(err)
 }
 
@@ -65,9 +65,9 @@ func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
 	fmt.Println("BridgeFileHandle Release")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	if f.fd != -1 {
-		err := syscall.Close(f.fd)
-		f.fd = -1
+	if f.Fd != -1 {
+		err := syscall.Close(f.Fd)
+		f.Fd = -1
 		return fs.ToErrno(err)
 	}
 	return syscall.EBADF
@@ -77,10 +77,10 @@ func (f *BridgeFileHandle) Flush(ctx context.Context) syscall.Errno {
 	fmt.Println("BridgeFileHandle Flush")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	// Since Flush() may be called for each dup'd fd, we don't
+	// Since Flush() may be called for each dup'd Fd, we don't
 	// want to really close the file, we just want to flush. This
-	// is achieved by closing a dup'd fd.
-	newFd, err := syscall.Dup(f.fd)
+	// is achieved by closing a dup'd Fd.
+	newFd, err := syscall.Dup(f.Fd)
 
 	if err != nil {
 		return fs.ToErrno(err)
@@ -92,7 +92,7 @@ func (f *BridgeFileHandle) Flush(ctx context.Context) syscall.Errno {
 func (f *BridgeFileHandle) Fsync(ctx context.Context, flags uint32) (errno syscall.Errno) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	r := fs.ToErrno(syscall.Fsync(f.fd))
+	r := fs.ToErrno(syscall.Fsync(f.Fd))
 
 	return r
 }
@@ -108,7 +108,7 @@ func (f *BridgeFileHandle) Getlk(ctx context.Context, owner uint64, lk *fuse.Fil
 	defer f.Mu.Unlock()
 	flk := syscall.Flock_t{}
 	lk.ToFlockT(&flk)
-	errno = fs.ToErrno(syscall.FcntlFlock(uintptr(f.fd), _OFD_GETLK, &flk))
+	errno = fs.ToErrno(syscall.FcntlFlock(uintptr(f.Fd), _OFD_GETLK, &flk))
 	out.FromFlockT(&flk)
 	return
 }
@@ -139,7 +139,7 @@ func (f *BridgeFileHandle) setLock(ctx context.Context, owner uint64, lk *fuse.F
 		if !blocking {
 			op |= syscall.LOCK_NB
 		}
-		return fs.ToErrno(syscall.Flock(f.fd, op))
+		return fs.ToErrno(syscall.Flock(f.Fd, op))
 	} else {
 		flk := syscall.Flock_t{}
 		lk.ToFlockT(&flk)
@@ -149,7 +149,7 @@ func (f *BridgeFileHandle) setLock(ctx context.Context, owner uint64, lk *fuse.F
 		} else {
 			op = _OFD_SETLK
 		}
-		return fs.ToErrno(syscall.FcntlFlock(uintptr(f.fd), op, &flk))
+		return fs.ToErrno(syscall.FcntlFlock(uintptr(f.Fd), op, &flk))
 	}
 }
 
@@ -167,7 +167,7 @@ func (f *BridgeFileHandle) setAttr(ctx context.Context, in *fuse.SetAttrIn) sysc
 	defer f.Mu.Unlock()
 	var errno syscall.Errno
 	if mode, ok := in.GetMode(); ok {
-		errno = fs.ToErrno(syscall.Fchmod(f.fd, mode))
+		errno = fs.ToErrno(syscall.Fchmod(f.Fd, mode))
 		if errno != 0 {
 			return errno
 		}
@@ -185,7 +185,7 @@ func (f *BridgeFileHandle) setAttr(ctx context.Context, in *fuse.SetAttrIn) sysc
 		if gOk {
 			gid = int(gid32)
 		}
-		errno = fs.ToErrno(syscall.Fchown(f.fd, uid, gid))
+		errno = fs.ToErrno(syscall.Fchown(f.Fd, uid, gid))
 		if errno != 0 {
 			return errno
 		}
@@ -210,7 +210,7 @@ func (f *BridgeFileHandle) setAttr(ctx context.Context, in *fuse.SetAttrIn) sysc
 	}
 
 	if sz, ok := in.GetSize(); ok {
-		errno = fs.ToErrno(syscall.Ftruncate(f.fd, int64(sz)))
+		errno = fs.ToErrno(syscall.Ftruncate(f.Fd, int64(sz)))
 		if errno != 0 {
 			return errno
 		}
@@ -222,7 +222,7 @@ func (f *BridgeFileHandle) Getattr(ctx context.Context, a *fuse.AttrOut) syscall
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	st := syscall.Stat_t{}
-	err := syscall.Fstat(f.fd, &st)
+	err := syscall.Fstat(f.Fd, &st)
 	if err != nil {
 		return fs.ToErrno(err)
 	}
@@ -234,6 +234,6 @@ func (f *BridgeFileHandle) Getattr(ctx context.Context, a *fuse.AttrOut) syscall
 func (f *BridgeFileHandle) Lseek(ctx context.Context, off uint64, whence uint32) (uint64, syscall.Errno) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
-	n, err := unix.Seek(f.fd, int64(off), int(whence))
+	n, err := unix.Seek(f.Fd, int64(off), int(whence))
 	return uint64(n), fs.ToErrno(err)
 }

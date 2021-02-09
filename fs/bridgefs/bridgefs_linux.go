@@ -84,6 +84,6 @@ func (n *BridgeNode) CopyFileRange(ctx context.Context, fhIn fs.FileHandle,
 
 	signedOffIn := int64(offIn)
 	signedOffOut := int64(offOut)
-	count, err := unix.CopyFileRange(lfIn.fd, &signedOffIn, lfOut.fd, &signedOffOut, int(len), int(flags))
+	count, err := unix.CopyFileRange(lfIn.Fd, &signedOffIn, lfOut.Fd, &signedOffOut, int(len), int(flags))
 	return uint32(count), fs.ToErrno(err)
 }

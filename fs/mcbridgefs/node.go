@@ -36,6 +36,7 @@ var (
 	DB                 *gorm.DB
 	GlobusRequest      mcmodel.GlobusRequest
 	openedFilesTracker sync.Map
+	txRetryCount       int
 )
 
 func init() {
@@ -47,6 +48,13 @@ func init() {
 	gid32, _ := strconv.ParseUint(u.Gid, 10, 32)
 	uid = uint32(uid32)
 	gid = uint32(gid32)
+
+	txRetryCount64, err := strconv.ParseInt(os.Getenv("MC_TX_RETRY"), 10, 32)
+	if err != nil {
+		txRetryCount64 = 3
+	}
+
+	txRetryCount = int(txRetryCount64)
 }
 
 func RootNode() *Node {
@@ -411,6 +419,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 			fmt.Printf("Storing into opendFilesTracker '%s'\n", path)
 			openedFilesTracker.Store(path, newFile)
 		}
+		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND
 	default:
 		fmt.Println("    Open flags Invalid")
@@ -433,20 +442,31 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	fmt.Println("Node Setattr")
-	path := n.file.ToPath(MCFSRoot)
-	fpath := filepath.Join("/", n.Path(n.Root()))
-	newFile := getFromOpenedFiles(fpath)
-	if newFile != nil {
-		path = newFile.ToPath(MCFSRoot)
+	//path := n.file.ToPath(MCFSRoot)
+	//fpath := filepath.Join("/", n.Path(n.Root()))
+	//newFile := getFromOpenedFiles(fpath)
+	//if newFile != nil {
+	//	path = newFile.ToPath(MCFSRoot)
+	//}
+
+	if sz, ok := in.GetSize(); ok {
+		// if newFile != nil {
+		//    Truncate an existing globus instance file
+		fh := f.(*FileHandle)
+		return fs.ToErrno(syscall.Ftruncate(fh.Fd, int64(sz)))
+		// } else {
+		//    Want to truncate a file but instead need to create a new file... however we already have a handle
+		//    so this case should never occur...
+		// }
 	}
 
-	fi, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("os.Stat %s failed: %s\n", path, err)
-	}
-	if err == nil {
-		fmt.Printf("   Node Setattr stat (%s) size = %d\n", path, fi.Size())
-	}
+	//fi, err := os.Stat(path)
+	//if err != nil {
+	//	fmt.Printf("os.Stat %s failed: %s\n", path, err)
+	//}
+	//if err == nil {
+	//	fmt.Printf("   Node Setattr stat (%s) size = %d\n", path, fi.Size())
+	//}
 	return fs.OK
 }
 
@@ -562,49 +582,45 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 
 	var _ = f.Close()
 
-	for i := 0; i < 3; i++ {
-		err = DB.Transaction(func(tx *gorm.DB) error {
-			result := tx.Create(newFile)
+	err = withTxRetry(func(tx *gorm.DB) error {
+		result := tx.Create(newFile)
 
-			if result.Error != nil {
-				return result.Error
-			}
-
-			if result.RowsAffected != 1 {
-				// TODO: Fix this error
-				return errors.New("incorrect rows affected")
-			}
-
-			// Create a new globus request file entry to account for the new file
-			globusRequestFile := mcmodel.GlobusRequestFile{
-				ProjectID:       GlobusRequest.ProjectID,
-				OwnerID:         n.file.OwnerID,
-				GlobusRequestID: GlobusRequest.ID,
-				Name:            n.file.Name,
-				DirectoryID:     n.file.DirectoryID,
-				FileID:          newFile.ID,
-			}
-
-			if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
-				return err
-			}
-
-			result = tx.Create(&globusRequestFile)
-			if result.Error != nil {
-				return result.Error
-			}
-
-			if result.RowsAffected != 1 {
-				// TODO: Fix this error
-				return errors.New("incorrect rows affected")
-			}
-
-			return nil
-		})
-		if err == nil {
-			break
+		if result.Error != nil {
+			return result.Error
 		}
-	}
+
+		if result.RowsAffected != 1 {
+			// TODO: Fix this error
+			return errors.New("incorrect rows affected")
+		}
+
+		// Create a new globus request file entry to account for the new file
+		globusRequestFile := mcmodel.GlobusRequestFile{
+			ProjectID:       GlobusRequest.ProjectID,
+			OwnerID:         n.file.OwnerID,
+			GlobusRequestID: GlobusRequest.ID,
+			Name:            n.file.Name,
+			DirectoryID:     n.file.DirectoryID,
+			FileID:          newFile.ID,
+		}
+
+		if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
+			return err
+		}
+
+		result = tx.Create(&globusRequestFile)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected != 1 {
+			// TODO: Fix this error
+			return errors.New("incorrect rows affected")
+		}
+
+		return nil
+	}, DB, txRetryCount)
+
 	if err != nil {
 		return nil, err
 	}
@@ -642,51 +658,45 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		return nil, err
 	}
 
-	for i := 0; i < 3; i++ {
-		err = DB.Transaction(func(tx *gorm.DB) error {
-			result := tx.Create(newFile)
+	err = withTxRetry(func(tx *gorm.DB) error {
+		result := tx.Create(newFile)
 
-			if result.Error != nil {
-				fmt.Println("    Failed create newFile")
-				return result.Error
-			}
-
-			if result.RowsAffected != 1 {
-				// TODO: Fix this error
-				return errors.New("incorrect rows affected")
-			}
-
-			globusRequestFile := mcmodel.GlobusRequestFile{
-				ProjectID:       GlobusRequest.ProjectID,
-				OwnerID:         GlobusRequest.OwnerID,
-				DirectoryID:     dir.ID,
-				GlobusRequestID: GlobusRequest.ID,
-				Name:            name,
-				FileID:          newFile.ID,
-			}
-
-			if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
-				return err
-			}
-
-			result = tx.Create(&globusRequestFile)
-			if result.Error != nil {
-				fmt.Println("   failed create globusRequestFile")
-				return result.Error
-			}
-
-			if result.RowsAffected != 1 {
-				// TODO: Fix this error
-				return errors.New("incorrect rows affected")
-			}
-
-			return nil
-		})
-
-		if err == nil {
-			break
+		if result.Error != nil {
+			fmt.Println("    Failed create newFile")
+			return result.Error
 		}
-	}
+
+		if result.RowsAffected != 1 {
+			// TODO: Fix this error
+			return errors.New("incorrect rows affected")
+		}
+
+		globusRequestFile := mcmodel.GlobusRequestFile{
+			ProjectID:       GlobusRequest.ProjectID,
+			OwnerID:         GlobusRequest.OwnerID,
+			DirectoryID:     dir.ID,
+			GlobusRequestID: GlobusRequest.ID,
+			Name:            name,
+			FileID:          newFile.ID,
+		}
+
+		if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
+			return err
+		}
+
+		result = tx.Create(&globusRequestFile)
+		if result.Error != nil {
+			fmt.Println("   failed create globusRequestFile")
+			return result.Error
+		}
+
+		if result.RowsAffected != 1 {
+			// TODO: Fix this error
+			return errors.New("incorrect rows affected")
+		}
+
+		return nil
+	}, DB, txRetryCount)
 
 	if err != nil {
 		return nil, err

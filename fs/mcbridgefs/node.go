@@ -335,6 +335,7 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 }
 
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	timeStart := time.Now()
 	fmt.Println("Node Create: ", name)
 	f, err := n.createNewMCFile(name)
 	if err != nil {
@@ -362,10 +363,12 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	node := n.newNode()
 	node.file = f
 	out.FromStat(&statInfo)
+	fmt.Printf("Create for %s took %d milliseconds...\n", f.Name, time.Now().Sub(timeStart).Milliseconds())
 	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd, flags), 0, fs.OK
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	timeStart := time.Now()
 	var (
 		err     error
 		newFile *mcmodel.File
@@ -424,6 +427,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		return nil, 0, fs.ToErrno(err)
 	}
 	fhandle := NewFileHandle(fd, flags)
+	fmt.Printf("Open for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fhandle, 0, fs.OK
 }
 
@@ -447,56 +451,62 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 }
 
 func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	timeStart := time.Now()
 	fmt.Println("Node Release")
-	if bridgeFH, ok := f.(fs.FileReleaser); ok {
-		//fmt.Println("   Handle is BridgeFileHandle")
-		if err := bridgeFH.Release(ctx); err != fs.OK {
-			return err
-		}
+	bridgeFH, ok := f.(fs.FileReleaser)
+	if !ok {
+		return syscall.EINVAL
+	}
 
-		// If read only then no need to update size or current flag
-		fh := bridgeFH.(*FileHandle)
-		if fh.Flags&syscall.O_ACCMODE == syscall.O_RDONLY {
-			return fs.OK
-		}
+	//fmt.Println("   Handle is BridgeFileHandle")
+	if err := bridgeFH.Release(ctx); err != fs.OK {
+		return err
+	}
 
-		//fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
-		path := n.file.ToPath(MCFSRoot)
-		mcToUpdate := n.file
-		fpath := filepath.Join("/", n.Path(n.Root()))
-		newFile := getFromOpenedFiles(fpath)
-		if newFile != nil {
-			path = newFile.ToPath(MCFSRoot)
-			mcToUpdate = newFile
-		}
+	// If read only then no need to update size or current flag
+	fh := bridgeFH.(*FileHandle)
+	if fh.Flags&syscall.O_ACCMODE == syscall.O_RDONLY {
+		return fs.OK
+	}
 
-		//fmt.Printf("n.file = %+v\n", n.file)
-		//fmt.Printf("mcToUpdate = %+v\n", mcToUpdate)
-		fi, err := os.Stat(path)
-		if err != nil {
-			fmt.Printf("os.Stat %s failed: %s\n", path, err)
-			return fs.ToErrno(err)
-		}
-		//fmt.Printf("   Node Release stat (%s) size = %d\n", path, fi.Size())
-		err = DB.Transaction(func(tx *gorm.DB) error {
-			err := tx.Model(&mcmodel.File{}).
-				Where("directory_id = ?", n.file.DirectoryID).
-				Where("name = ?", n.file.Name).
-				Update("current", false).Error
-			if err != nil {
-				return err
-			}
+	//fmt.Println("   Did Release on BridgeFileHandle, now doing Stat")
+	path := n.file.ToPath(MCFSRoot)
+	mcToUpdate := n.file
+	fpath := filepath.Join("/", n.Path(n.Root()))
+	newFile := getFromOpenedFiles(fpath)
+	if newFile != nil {
+		path = newFile.ToPath(MCFSRoot)
+		mcToUpdate = newFile
+	}
 
-			//fmt.Printf("Starting updates of mcToUpdate\n")
-			err = tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
-			//fmt.Printf("Finished updates of mcToUpdate: %s\n", err)
-			return err
-		})
-
-		//fmt.Println("Release after transaction err =", err)
+	fmt.Printf("n.file = %+v\n", n.file)
+	fmt.Printf("mcToUpdate = %+v\n", mcToUpdate)
+	fi, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("os.Stat %s failed: %s\n", path, err)
 		return fs.ToErrno(err)
 	}
-	return syscall.EINVAL
+	//fmt.Printf("   Node Release stat (%s) size = %d\n", path, fi.Size())
+	//var err error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		err := tx.Model(&mcmodel.File{}).
+			Where("directory_id = ?", n.file.DirectoryID).
+			Where("name = ?", n.file.Name).
+			Update("current", false).Error
+		if err != nil {
+			return err
+		}
+
+		//fmt.Printf("Starting updates of mcToUpdate\n")
+		err = tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
+		//err = tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(36), Current: true}).Error
+		//fmt.Printf("Finished updates of mcToUpdate: %s\n", err)
+		return err
+	})
+
+	//fmt.Println("Release after transaction err =", err)
+	fmt.Printf("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
+	return fs.ToErrno(err)
 }
 
 func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {

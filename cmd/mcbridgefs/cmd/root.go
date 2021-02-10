@@ -16,7 +16,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -24,8 +23,6 @@ import (
 	"github.com/materials-commons/gomcdb/mcmodel"
 	mcbridge "github.com/materials-commons/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
-	"github.com/mitchellh/go-homedir"
-	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -56,42 +53,17 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		// Search config in home directory with name ".mcbridgefs" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".mcbridgefs")
-	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
-	}
+	// We don't use viper because all the needed configuration variables are in the environment that Laravel
+	// automatically sets up when a new process is launched.
 }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "mcbridgefs",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
+	Short: "Create a file system for Globus to write to",
+	Long: `mcbridgefs creates a FUSE based file system to intercept Globus calls to the file system
+and present the Materials Commons storage in a way that Globus understands. It handles creating new
+file versions and consistency for the project that the globus request is associated with.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) != 1 {
 			log.Fatalf("No path specified for mount.")
@@ -120,6 +92,11 @@ to quickly create a Cobra application.`,
 			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, result.Error)
 		}
 
+		if globusRequest.State != "new" {
+			log.Infof("GlobusRequest %d state is not 'new' (state = %s), aborting", globusRequest.ID, globusRequest.State)
+			os.Exit(0)
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 
 		mcbridgefs.GlobusRequest = globusRequest
@@ -130,11 +107,7 @@ to quickly create a Cobra application.`,
 		server := mustMount(args[0], rootNode)
 
 		onClose := func() {
-			if err := server.Unmount(); err != nil {
-				log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, server.mountPoint)
-			}
-
-			os.Exit(0)
+			server.c <- syscall.SIGINT
 		}
 
 		closedRequestMonitor := mcbridge.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
@@ -152,6 +125,7 @@ var timeout = 10 * time.Second
 type Server struct {
 	*fuse.Server
 	mountPoint string
+	c          chan os.Signal
 }
 
 func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
@@ -172,20 +146,20 @@ func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
 	return &Server{
 		Server:     server,
 		mountPoint: mountPoint,
+		c:          make(chan os.Signal, 1),
 	}
 }
 
 func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
-	sig := <-c
+	signal.Notify(s.c, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-s.c
 	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
 	cancelFunc()
 	if err := s.Unmount(); err != nil {
 		log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, s.mountPoint)
 	}
 
-	<-c
+	<-s.c
 	log.Warnf("Force exiting...")
 	os.Exit(1)
 }
@@ -194,7 +168,7 @@ func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		log.Infof("rootCmd.Execute failed:", err)
 		os.Exit(1)
 	}
 }

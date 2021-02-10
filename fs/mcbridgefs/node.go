@@ -123,10 +123,10 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	filesList := make([]fuse.DirEntry, 0, len(files))
 
 	// Build up the list of entries in the directory. First go through the list of matching file entries,
-	// and remove any names that match in uploadedFilesByName. The uploadedFilesByName hash contains files that are being
-	/// written to. Some will be new files that haven't yet been set as current (so didn't show up in
-	// the query to get the files for that directory) and some are existing files that are being updated.
-	// The files that are being updated are removed from the uploadedFilesByName list.
+	// and remove any names that match in uploadedFilesByName. The uploadedFilesByName hash contains files
+	// that are being written to. Some will be new files that haven't yet been set as current (so didn't
+	// show up in the query to get the files for that directory) and some are existing files that are
+	// being updated. The files that are being updated are removed from the uploadedFilesByName list.
 	for _, fileEntry := range files {
 		// If there is an entry in uploadedFilesByName then this overrides the directory listing as it means that
 		// a new version of the file has been uploaded.
@@ -287,7 +287,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 
 	fmt.Printf("   parent = %+v\n", parent)
 
-	err = DB.Transaction(func(tx *gorm.DB) error {
+	err = withTxRetry(func(tx *gorm.DB) error {
 		err := tx.Where("path = ", path).
 			Where("project_id = ", GlobusRequest.ProjectID).
 			Find(&dir).Error
@@ -312,7 +312,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		}
 
 		return tx.Create(&dir).Error
-	})
+	}, DB, txRetryCount)
 
 	if err != nil {
 		fmt.Println("   Transaction returned err =", err)
@@ -357,7 +357,7 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	if err := syscall.Fstat(fd, &statInfo); err != nil {
 		// TODO - Remove newly created file version in db
 		fmt.Println("   Fstat failed:", err)
-		syscall.Close(fd)
+		_ = syscall.Close(fd)
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 	// Is this sequence correct?

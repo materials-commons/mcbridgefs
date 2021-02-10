@@ -76,14 +76,24 @@ func (n *Node) newNode() *Node {
 var _ = (fs.NodeReaddirer)((*Node)(nil))
 
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	// Directories can have a large amount of files. To speed up processing
+	// Readdir uses queries that don't retrieve either the underlying directory
+	// for a mcmodel.File, or the underlying file for a mcmodel.GlobusRequestFile.
+	// However, the path for the directory is still needed. This is accessed
+	// off of the underlying mcmodel.File by the FullPath() routine which is
+	// used the inodeHash() and getMode() methods. To work around this we
+	// create a single directory (see dirToUse below), and assign this as the
+	// directory for all mcmodel.File entries.
+	dirPath := filepath.Join("/", n.Path(n.Root()))
+	dirToUse := &mcmodel.File{Path: dirPath}
+
 	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
 	var files []mcmodel.File
-	err = DB.Preload("Directory").
-		Where("directory_id = ?", dir.ID).
+	err = DB.Where("directory_id = ?", dir.ID).
 		Where("project_id", GlobusRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
@@ -94,31 +104,43 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 	// Get files that have been uploaded
 	var globusUploadedFiles []mcmodel.GlobusRequestFile
-	results := DB.Preload("File.Directory").
-		Where("directory_id = ?", dir.ID).
+	results := DB.Where("directory_id = ?", dir.ID).
 		Where("globus_request_id = ?", GlobusRequest.ID).
 		Find(&globusUploadedFiles)
 
-	filesByName := make(map[string]*mcmodel.File)
+	uploadedFilesByName := make(map[string]*mcmodel.File)
 	if results.Error == nil && len(globusUploadedFiles) != 0 {
-		// convert the files into a hashtable by name
+		// Convert the files into a hashtable by name. Since we don't have the underlying mcmodel.File
+		// we create one on the fly only filling in the entries that will be needed to return the
+		// data about the directory. In this case all that is needed are the Name and the Directory (only
+		// Path off the directory). So for directory we use the single entry dirToUse. See comment at
+		// start of Readdir that explains this.
 		for _, requestFile := range globusUploadedFiles {
-			filesByName[requestFile.File.Name] = requestFile.File
+			uploadedFilesByName[requestFile.Name] = &mcmodel.File{Name: requestFile.Name, Directory: dirToUse}
 		}
 	}
 
 	filesList := make([]fuse.DirEntry, 0, len(files))
 
+	// Build up the list of entries in the directory. First go through the list of matching file entries,
+	// and remove any names that match in uploadedFilesByName. The uploadedFilesByName hash contains files that are being
+	/// written to. Some will be new files that haven't yet been set as current (so didn't show up in
+	// the query to get the files for that directory) and some are existing files that are being updated.
+	// The files that are being updated are removed from the uploadedFilesByName list.
 	for _, fileEntry := range files {
-		// If there is an entry in filesByName then this overrides the directory listing as it means that
+		// If there is an entry in uploadedFilesByName then this overrides the directory listing as it means that
 		// a new version of the file has been uploaded.
-		if foundEntry, ok := filesByName[fileEntry.Name]; ok {
+		if foundEntry, ok := uploadedFilesByName[fileEntry.Name]; ok {
 			fileEntry = *foundEntry
 
 			// Remove from the hash table because we are going to need to make one more pass through the
-			// filesByName hash to pick up any newly uploaded files in the directory.
-			delete(filesByName, fileEntry.Name)
+			// uploadedFilesByName hash to pick up any newly uploaded files in the directory.
+			delete(uploadedFilesByName, fileEntry.Name)
 		}
+
+		// Assign dirToUse as the directory to use since we didn't retrieve the directory
+		// when getting the file.
+		fileEntry.Directory = dirToUse
 
 		entry := fuse.DirEntry{
 			Mode: n.getMode(&fileEntry),
@@ -129,8 +151,9 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		filesList = append(filesList, entry)
 	}
 
-	// Add any newly uploaded files
-	for _, fileEntry := range filesByName {
+	// Now go through the uploadedFilesByName hash table. At this point it only contains new files that
+	// are being written to by this globus instance.
+	for _, fileEntry := range uploadedFilesByName {
 		entry := fuse.DirEntry{
 			Mode: n.getMode(fileEntry),
 			Name: fileEntry.Name,
@@ -165,7 +188,6 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 }
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	fmt.Println("Lookup:", name)
 	// TODO: Get the file from the database and then use that to compute the inode
 
 	f, err := n.lookupEntry(name)
@@ -699,11 +721,9 @@ func (n *Node) getMode(entry *mcmodel.File) uint32 {
 
 func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 	if entry == nil {
-		//fmt.Printf("inodeHash entry is nil\n")
 		return 1
 	}
 
-	//fmt.Printf("inodeHash entry.FullPath() = %s\n", entry.FullPath())
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(entry.FullPath()))
 	return h.Sum64()

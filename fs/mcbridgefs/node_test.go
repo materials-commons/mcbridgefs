@@ -27,12 +27,12 @@ func TestWrite100ThousandFiles(t *testing.T) {
 	}
 }
 
-func TestWrite5000FilesInParallel(t *testing.T) {
+func TestWrite500FilesInParallel(t *testing.T) {
 	timeStart := time.Now()
 	for i := 0; i < 50; i++ {
 		t.Run(fmt.Sprintf("Parallel%d", i), func(t *testing.T) {
 			t.Parallel()
-			for j := 0; j < 100; j++ {
+			for j := 0; j < 10; j++ {
 				fname, err := uuid.GenerateUUID()
 				require.NoError(t, err, "GenerateUUID failed: %s", err)
 				filename := filepath.Join("/home/gtarcea/mcdir/mcfs/data/test/tproj", fname+".txt")

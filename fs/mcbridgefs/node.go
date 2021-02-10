@@ -170,6 +170,11 @@ func (n *Node) Opendir(ctx context.Context) syscall.Errno {
 	return fs.OK
 }
 
+func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	//fmt.Printf("Node Getxattr: %s\n", filepath.Join("/", n.Path(n.Root())))
+	return 0, fs.OK
+}
+
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	//fmt.Printf("Node Getattr: %s\n", filepath.Join("/", n.Path(n.Root())))
 	if n.file != nil {
@@ -188,10 +193,9 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 }
 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// TODO: Get the file from the database and then use that to compute the inode
-
 	f, err := n.lookupEntry(name)
 	if err != nil {
+		//fmt.Printf("lookEntry (%s) failed: %s\n", name, err)
 		return nil, syscall.ENOENT
 	}
 

@@ -8,6 +8,7 @@ package bridgefs
 
 import (
 	"context"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"path/filepath"
 	"syscall"
@@ -16,21 +17,25 @@ import (
 )
 
 func (n *BridgeNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	fmt.Println("BridgeNode Getxattr")
 	sz, err := unix.Lgetxattr(n.path(""), attr, dest)
 	return uint32(sz), fs.ToErrno(err)
 }
 
 func (n *BridgeNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+	fmt.Println("BridgeNode Setxattr")
 	err := unix.Lsetxattr(n.path(""), attr, data, int(flags))
 	return fs.ToErrno(err)
 }
 
 func (n *BridgeNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
+	fmt.Println("BridgeNode Removexattr")
 	err := unix.Lremovexattr(n.path(""), attr)
 	return fs.ToErrno(err)
 }
 
 func (n *BridgeNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	fmt.Println("BridgeNode Listxattr")
 	sz, err := unix.Llistxattr(n.path(""), dest)
 	return uint32(sz), fs.ToErrno(err)
 }

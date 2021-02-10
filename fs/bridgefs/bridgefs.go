@@ -342,7 +342,7 @@ func (n *BridgeNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 }
 
 func (n *BridgeNode) Opendir(ctx context.Context) syscall.Errno {
-	fmt.Printf("Opendir: %s\n", filepath.Join("/", n.Path(n.Root())))
+	fmt.Printf("BridgeNode Opendir: %s\n", filepath.Join("/", n.Path(n.Root())))
 	fd, err := syscall.Open(n.path(""), syscall.O_DIRECTORY, 0755)
 	if err != nil {
 		return fs.ToErrno(err)

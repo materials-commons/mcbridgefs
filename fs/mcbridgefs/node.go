@@ -50,7 +50,7 @@ func init() {
 	gid = uint32(gid32)
 
 	txRetryCount64, err := strconv.ParseInt(os.Getenv("MC_TX_RETRY"), 10, 32)
-	if err != nil {
+	if err != nil || txRetryCount64 < 3 {
 		txRetryCount64 = 3
 	}
 

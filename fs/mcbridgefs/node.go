@@ -23,8 +23,6 @@ import (
 	"time"
 )
 
-// TODO: projectID and mcfsRoot should be saved in a single place, not in every node
-// TODO: Check if db is threadsafe
 type Node struct {
 	file *mcmodel.File
 	*bridgefs.BridgeNode
@@ -34,10 +32,22 @@ var (
 	uid, gid           uint32
 	MCFSRoot           string
 	DB                 *gorm.DB
-	GlobusRequest      mcmodel.GlobusRequest
+	globusRequest      mcmodel.GlobusRequest
 	openedFilesTracker sync.Map
 	txRetryCount       int
 )
+
+func SetMCFSRoot(root string) {
+	MCFSRoot = root
+}
+
+func SetDB(db *gorm.DB) {
+	DB = db
+}
+
+func SetGlobusRequest(gr mcmodel.GlobusRequest) {
+	globusRequest = gr
+}
 
 func init() {
 	u, err := user.Current()
@@ -94,7 +104,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 	var files []mcmodel.File
 	err = DB.Where("directory_id = ?", dir.ID).
-		Where("project_id", GlobusRequest.ProjectID).
+		Where("project_id", globusRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
 
@@ -105,7 +115,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	// Get files that have been uploaded
 	var globusUploadedFiles []mcmodel.GlobusRequestFile
 	results := DB.Where("directory_id = ?", dir.ID).
-		Where("globus_request_id = ?", GlobusRequest.ID).
+		Where("globus_request_id = ?", globusRequest.ID).
 		Find(&globusUploadedFiles)
 
 	uploadedFilesByName := make(map[string]*mcmodel.File)
@@ -252,7 +262,7 @@ func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	var file mcmodel.File
 	path := filepath.Join("/", n.Path(n.Root()), name)
 	err := DB.Preload("Directory").
-		Where("project_id = ?", GlobusRequest.ProjectID).
+		Where("project_id = ?", globusRequest.ProjectID).
 		Where("path = ?", path).
 		First(&file).Error
 
@@ -293,7 +303,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 
 	err = withTxRetry(func(tx *gorm.DB) error {
 		err := tx.Where("path = ", path).
-			Where("project_id = ", GlobusRequest.ProjectID).
+			Where("project_id = ", globusRequest.ProjectID).
 			Find(&dir).Error
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
 			// directory already exists no need to create
@@ -301,13 +311,13 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 			return nil
 		}
 		dir = mcmodel.File{
-			OwnerID:              GlobusRequest.OwnerID,
+			OwnerID:              globusRequest.OwnerID,
 			MimeType:             "directory",
 			MediaTypeDescription: "directory",
 			DirectoryID:          parent.ID,
 			Current:              true,
 			Path:                 path,
-			ProjectID:            GlobusRequest.ProjectID,
+			ProjectID:            globusRequest.ProjectID,
 			Name:                 name,
 		}
 
@@ -544,9 +554,9 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 
 		// Create a new globus request file entry to account for the new file
 		globusRequestFile := mcmodel.GlobusRequestFile{
-			ProjectID:       GlobusRequest.ProjectID,
+			ProjectID:       globusRequest.ProjectID,
 			OwnerID:         n.file.OwnerID,
-			GlobusRequestID: GlobusRequest.ID,
+			GlobusRequestID: globusRequest.ID,
 			Name:            n.file.Name,
 			DirectoryID:     n.file.DirectoryID,
 			FileID:          newFile.ID,
@@ -584,13 +594,13 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 	}
 
 	newFile := &mcmodel.File{
-		ProjectID:   GlobusRequest.ProjectID,
+		ProjectID:   globusRequest.ProjectID,
 		Name:        name,
 		DirectoryID: dir.ID,
 		Size:        0,
 		Checksum:    "",
 		MimeType:    getMimeType(name),
-		OwnerID:     GlobusRequest.OwnerID,
+		OwnerID:     globusRequest.OwnerID,
 		Current:     false,
 	}
 
@@ -618,10 +628,10 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		}
 
 		globusRequestFile := mcmodel.GlobusRequestFile{
-			ProjectID:       GlobusRequest.ProjectID,
-			OwnerID:         GlobusRequest.OwnerID,
+			ProjectID:       globusRequest.ProjectID,
+			OwnerID:         globusRequest.OwnerID,
 			DirectoryID:     dir.ID,
-			GlobusRequestID: GlobusRequest.ID,
+			GlobusRequestID: globusRequest.ID,
 			Name:            name,
 			FileID:          newFile.ID,
 		}
@@ -675,7 +685,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 	var f mcmodel.File
 	err = DB.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
-		Where("project_id = ?", GlobusRequest.ProjectID).
+		Where("project_id = ?", globusRequest.ProjectID).
 		Where("name = ?", name).
 		Where("current = ?", true).
 		Find(&f).Error

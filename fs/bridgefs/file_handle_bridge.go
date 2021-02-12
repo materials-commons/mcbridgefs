@@ -54,7 +54,7 @@ func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res
 }
 
 func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	fmt.Println("BridgeFileHandleWrite")
+	fmt.Println("BridgeFileHandle Write")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	n, err := syscall.Pwrite(f.Fd, data, off)

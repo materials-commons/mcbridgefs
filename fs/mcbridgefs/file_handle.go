@@ -1,8 +1,13 @@
 package mcbridgefs
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
+	"io"
+	"syscall"
 )
 
 // Code based on loopback file system from github.com/hanwen/go-fuse/v2/fs/file.go
@@ -10,6 +15,7 @@ import (
 type FileHandle struct {
 	*bridgefs.BridgeFileHandle
 	Flags uint32
+	Path  string
 }
 
 var _ = (fs.FileHandle)((*FileHandle)(nil))
@@ -26,6 +32,23 @@ var _ = (fs.FileFsyncer)((*FileHandle)(nil))
 var _ = (fs.FileSetattrer)((*FileHandle)(nil))
 var _ = (fs.FileAllocater)((*FileHandle)(nil))
 
-func NewFileHandle(fd int, flags uint32) fs.FileHandle {
-	return &FileHandle{bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle), flags}
+func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
+	return &FileHandle{
+		BridgeFileHandle: bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle),
+		Flags:            flags,
+		Path:             path,
+	}
+}
+
+func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+	fmt.Println("FileHandle Write")
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	n, err := syscall.Pwrite(f.Fd, data, off)
+
+	file := openedFilesTracker.Get(f.Path)
+	if file != nil && n > 0 {
+		io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
+	}
+	return uint32(n), fs.ToErrno(err)
 }

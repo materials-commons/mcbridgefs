@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -29,11 +28,12 @@ type Node struct {
 }
 
 var (
-	uid, gid           uint32
-	MCFSRoot           string
-	DB                 *gorm.DB
-	globusRequest      mcmodel.GlobusRequest
-	openedFilesTracker sync.Map
+	uid, gid      uint32
+	MCFSRoot      string
+	DB            *gorm.DB
+	globusRequest mcmodel.GlobusRequest
+	//openedFilesTracker sync.Map
+	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 )
 
@@ -65,6 +65,8 @@ func init() {
 	}
 
 	txRetryCount = int(txRetryCount64)
+
+	openedFilesTracker = NewOpenFilesTracker()
 }
 
 func RootNode() *Node {
@@ -379,7 +381,7 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	node.file = f
 	out.FromStat(&statInfo)
 	fmt.Printf("Create for %s took %d milliseconds...\n", f.Name, time.Now().Sub(timeStart).Milliseconds())
-	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd, flags), 0, fs.OK
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd, flags, path), 0, fs.OK
 }
 
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
@@ -433,7 +435,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		fmt.Printf("   syscall.Open failed, err = %s\n", err)
 		return nil, 0, fs.ToErrno(err)
 	}
-	fhandle := NewFileHandle(fd, flags)
+	fhandle := NewFileHandle(fd, flags, path)
 	fmt.Printf("Open for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fhandle, 0, fs.OK
 }
@@ -450,6 +452,7 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 }
 
 func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	var newFile *mcmodel.File = nil
 	timeStart := time.Now()
 	fmt.Println("Node Release")
 	bridgeFH, ok := f.(fs.FileReleaser)
@@ -470,7 +473,11 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	path := n.file.ToPath(MCFSRoot)
 	mcToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
-	newFile := getFromOpenedFiles(fpath)
+	nf := openedFilesTracker.Get(fpath)
+	if nf != nil {
+		newFile = nf.File
+	}
+	//newFile := getFromOpenedFiles(fpath)
 	if newFile != nil {
 		path = newFile.ToPath(MCFSRoot)
 		mcToUpdate = newFile
@@ -481,7 +488,11 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		fmt.Printf("os.Stat %s failed: %s\n", path, err)
 		return fs.ToErrno(err)
 	}
+
+	checksum := fmt.Sprintf("%x", nf.hasher.Sum(nil))
+
 	err = withTxRetry(func(tx *gorm.DB) error {
+		// TODO: Update the check for file
 		err := tx.Model(&mcmodel.File{}).
 			Where("directory_id = ?", n.file.DirectoryID).
 			Where("name = ?", n.file.Name).
@@ -491,7 +502,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 			return err
 		}
 
-		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
+		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true, Checksum: checksum}).Error
 	}, DB, txRetryCount)
 
 	fmt.Printf("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
@@ -744,9 +755,9 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 }
 
 func getFromOpenedFiles(path string) *mcmodel.File {
-	val, _ := openedFilesTracker.Load(path)
+	val := openedFilesTracker.Get(path)
 	if val != nil {
-		return val.(*mcmodel.File)
+		return val.File
 	}
 
 	return nil

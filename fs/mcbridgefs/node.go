@@ -440,9 +440,9 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	return fhandle, 0, fs.OK
 }
 
+// Setattr will set attributes on a file. Currently the only attribute supported is setting the size. This is
+// done by calling Ftruncate.
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	fmt.Println("Node Setattr")
-
 	if sz, ok := in.GetSize(); ok {
 		fh := f.(*FileHandle)
 		return fs.ToErrno(syscall.Ftruncate(fh.Fd, int64(sz)))
@@ -451,25 +451,28 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 	return fs.OK
 }
 
+// Release will close the file handle and update meta data about the file in the database
 func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	var newFile *mcmodel.File = nil
 	timeStart := time.Now()
-	fmt.Println("Node Release")
 	bridgeFH, ok := f.(fs.FileReleaser)
 	if !ok {
 		return syscall.EINVAL
 	}
 
+	// Call the underling fileHandle to close the actual file
 	if err := bridgeFH.Release(ctx); err != fs.OK {
 		return err
 	}
 
-	// If read only then no need to update size or current flag
+	// If the file was opened only for read then there is no meta data that needs to be updated.
 	fh := bridgeFH.(*FileHandle)
 	if fh.Flags&syscall.O_ACCMODE == syscall.O_RDONLY {
 		return fs.OK
 	}
 
+	// If we are here then the file was opened with a write flag. In this case we need to update the
+	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
 	path := n.file.ToPath(MCFSRoot)
 	mcToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
@@ -477,7 +480,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	if nf != nil {
 		newFile = nf.File
 	}
-	//newFile := getFromOpenedFiles(fpath)
+
 	if newFile != nil {
 		path = newFile.ToPath(MCFSRoot)
 		mcToUpdate = newFile
@@ -491,8 +494,10 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	checksum := fmt.Sprintf("%x", nf.hasher.Sum(nil))
 
+	// Update the meta data and set the file to be the current version.
 	err = withTxRetry(func(tx *gorm.DB) error {
-		// TODO: Update the check for file
+		// To set file as the current (ie viewable) version we first need to set all its previous
+		// versions to have current set to false.
 		err := tx.Model(&mcmodel.File{}).
 			Where("directory_id = ?", n.file.DirectoryID).
 			Where("name = ?", n.file.Name).
@@ -502,20 +507,35 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 			return err
 		}
 
-		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true, Checksum: checksum}).Error
+		// Now we can update the meta data on the current file. This includes, the size, current, and if there is
+		// a new computed checksum, also update the checksum field.
+		if checksum != "" {
+			return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true, Checksum: checksum}).Error
+		}
+
+		// If we are here then the file was opened for read/write but it was never written to. In this situation there
+		// is no checksum that has been computed, so don't update the field.
+		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
 	}, DB, txRetryCount)
 
-	fmt.Printf("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
+	// TODO: If there is already a file with matching checksum then we can delete this upload and set this file to
+	// point at the already uploaded file.
+
+	log.Infof("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fs.ToErrno(err)
 }
 
+// createNewMCFileVersion creates a new file version if there isn't already a version of the file
+// file associated with this globus request instance. It checks the openedFilesTracker to determine
+// if a new version has already been created. If a new version was already created then it will return
+// that version. Otherwise it will create a new version and add it to the OpenedFilesTracker. In
+// addition when a new version is created, the associated on disk directory is created and an empty
+// file is written to it.
 func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	// First check if there is already a version of this file being written to for this
 	// globus upload context.
-
 	existing := getFromOpenedFiles(filepath.Join("/", n.Path(n.Root()), n.file.Name))
 	if existing != nil {
-		fmt.Println("  createNewMCFileVersion found previously open - returning it")
 		return existing, nil
 	}
 
@@ -533,7 +553,8 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	if newFile.UUID, err = uuid.GenerateUUID(); err != nil {
+	newFile, err = addFileToDatabase(newFile, n.file.DirectoryID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -543,60 +564,22 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		return nil, err
 	}
 
+	// Create the empty file for new version
 	f, err := os.OpenFile(newFile.ToPath(MCFSRoot), os.O_RDWR|os.O_CREATE, 0755)
+
 	if err != nil {
 		fmt.Printf("os.OpenFile failed (%s): %s\n", newFile.ToPath(MCFSRoot), err)
 		return nil, err
 	}
+	defer f.Close()
 
-	var _ = f.Close()
-
-	err = withTxRetry(func(tx *gorm.DB) error {
-		result := tx.Create(newFile)
-
-		if result.Error != nil {
-			return result.Error
-		}
-
-		if result.RowsAffected != 1 {
-			// TODO: Fix this error
-			return errors.New("incorrect rows affected")
-		}
-
-		// Create a new globus request file entry to account for the new file
-		globusRequestFile := mcmodel.GlobusRequestFile{
-			ProjectID:       globusRequest.ProjectID,
-			OwnerID:         n.file.OwnerID,
-			GlobusRequestID: globusRequest.ID,
-			Name:            n.file.Name,
-			DirectoryID:     n.file.DirectoryID,
-			FileID:          newFile.ID,
-		}
-
-		if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
-			return err
-		}
-
-		result = tx.Create(&globusRequestFile)
-		if result.Error != nil {
-			return result.Error
-		}
-
-		if result.RowsAffected != 1 {
-			// TODO: Fix this error
-			return errors.New("incorrect rows affected")
-		}
-
-		return nil
-	}, DB, txRetryCount)
-
-	if err != nil {
-		return nil, err
-	}
+	newFile.Directory = n.file.Directory
 
 	return newFile, nil
 }
 
+// createNewMCFile will create a new mcmodel.File entry for the directory associated
+// with the Node. It will create the directory where the file can be written to.
 func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 	fmt.Println("createNewMCFile:", name)
 	dir, err := n.getMCDir("")
@@ -615,7 +598,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	if newFile.UUID, err = uuid.GenerateUUID(); err != nil {
+	if newFile, err = addFileToDatabase(newFile, dir.ID); err != nil {
 		return nil, err
 	}
 
@@ -625,11 +608,31 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		return nil, err
 	}
 
+	newFile.Directory = dir
+	return newFile, nil
+}
+
+// addFileToDatabase will add an mcmodel.File entry and an associated mcmodel.GlobusRequestFile entry
+// to the database. The file parameter must be filled out, except for the UUID which will be generated
+// for the file. The GlobusRequestFile will be created based on the file entry.
+func addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.File, error) {
+	var (
+		err               error
+		globusRequestUUID string
+	)
+
+	if file.UUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
+	if globusRequestUUID, err = uuid.GenerateUUID(); err != nil {
+		return nil, err
+	}
+
 	err = withTxRetry(func(tx *gorm.DB) error {
-		result := tx.Create(newFile)
+		result := tx.Create(file)
 
 		if result.Error != nil {
-			fmt.Println("    Failed create newFile")
 			return result.Error
 		}
 
@@ -638,39 +641,25 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 			return errors.New("incorrect rows affected")
 		}
 
+		// Create a new globus request file entry to account for the new file
 		globusRequestFile := mcmodel.GlobusRequestFile{
 			ProjectID:       globusRequest.ProjectID,
-			OwnerID:         globusRequest.OwnerID,
-			DirectoryID:     dir.ID,
+			OwnerID:         file.OwnerID,
 			GlobusRequestID: globusRequest.ID,
-			Name:            name,
-			FileID:          newFile.ID,
+			Name:            file.Name,
+			DirectoryID:     dirID,
+			FileID:          file.ID,
+			UUID:            globusRequestUUID,
 		}
 
-		if globusRequestFile.UUID, err = uuid.GenerateUUID(); err != nil {
-			return err
-		}
-
-		result = tx.Create(&globusRequestFile)
-		if result.Error != nil {
-			fmt.Println("   failed create globusRequestFile")
-			return result.Error
-		}
-
-		if result.RowsAffected != 1 {
-			// TODO: Fix this error
-			return errors.New("incorrect rows affected")
-		}
-
-		return nil
+		return tx.Create(&globusRequestFile).Error
 	}, DB, txRetryCount)
 
 	if err != nil {
 		return nil, err
 	}
 
-	newFile.Directory = dir
-	return newFile, nil
+	return file, nil
 }
 
 func getMimeType(name string) string {

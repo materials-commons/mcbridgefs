@@ -20,6 +20,7 @@ import (
 	"github.com/apex/log"
 	globus "github.com/materials-commons/goglobus"
 	mcdb "github.com/materials-commons/gomcdb"
+	"github.com/materials-commons/mcbridgefs/monitor"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -74,9 +75,8 @@ to quickly create a Cobra application.`,
 			log.Fatalf("Failed to create globus confidential client: %s", err)
 		}
 
-		_ = db
-		_ = globusClient
-		_ = ctx
+		globusTaskMonitor := monitor.NewGlobusTaskMonitor(globusClient, db, globusEndpointID)
+		globusTaskMonitor.Start(ctx)
 
 		quit := make(chan os.Signal)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

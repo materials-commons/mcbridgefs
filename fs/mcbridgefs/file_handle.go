@@ -39,6 +39,8 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 	}
 }
 
+// Write overrides the BridgeFileHandle write to incorporate updating the checksum as bytes
+// are written to the file.
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
 	n, err := f.BridgeFileHandle.Write(ctx, data, off)
 	if err != fs.OK {

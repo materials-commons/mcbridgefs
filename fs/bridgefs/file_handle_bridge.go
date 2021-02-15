@@ -10,8 +10,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"sync"
 
-	//	"time"
-
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fuse"

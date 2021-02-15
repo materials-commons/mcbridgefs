@@ -3,7 +3,6 @@ package mcbridgefs
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
 	"io"
@@ -41,14 +40,15 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 }
 
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	fmt.Println("FileHandle Write")
-	f.Mu.Lock()
-	defer f.Mu.Unlock()
-	n, err := syscall.Pwrite(f.Fd, data, off)
+	n, err := f.BridgeFileHandle.Write(ctx, data, off)
+	if err != fs.OK {
+		return n, fs.ToErrno(err)
+	}
 
 	file := openedFilesTracker.Get(f.Path)
 	if file != nil && n > 0 {
-		io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
+		_, _ = io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
 	}
-	return uint32(n), fs.ToErrno(err)
+
+	return n, fs.OK
 }

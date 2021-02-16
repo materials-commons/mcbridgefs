@@ -221,7 +221,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	f, err := n.lookupEntry(name)
 	if err != nil {
-		log.Errorf("lookEntry (%s) failed: %s\n", name, err)
+		//log.Errorf("lookupEntry (%s) failed: %s\n", name, err)
 		return nil, syscall.ENOENT
 	}
 
@@ -507,10 +507,21 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 			return err
 		}
 
+		err = tx.Model(&mcmodel.GlobusRequestFile{}).
+			Where("file_id = ?", mcToUpdate.ID).
+			Update("state", "inactive").Error
+		if err != nil {
+			return err
+		}
+
 		// Now we can update the meta data on the current file. This includes, the size, current, and if there is
 		// a new computed checksum, also update the checksum field.
 		if checksum != "" {
-			return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true, Checksum: checksum}).Error
+			return tx.Model(mcToUpdate).Updates(mcmodel.File{
+				Size:     uint64(fi.Size()),
+				Current:  true,
+				Checksum: checksum,
+			}).Error
 		}
 
 		// If we are here then the file was opened for read/write but it was never written to. In this situation there
@@ -650,6 +661,7 @@ func addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.File, error) {
 			Name:            file.Name,
 			DirectoryID:     dirID,
 			FileID:          file.ID,
+			State:           "uploading",
 			UUID:            globusRequestUUID,
 		}
 

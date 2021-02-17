@@ -159,9 +159,7 @@ func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
 		log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, s.mountPoint)
 	}
 
-	<-s.c
-	log.Warnf("Force exiting...")
-	os.Exit(1)
+	os.Exit(0)
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

@@ -156,7 +156,7 @@ func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
 	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
 	cancelFunc()
 	if err := s.Unmount(); err != nil {
-		log.Errorf("Failed to unmount: %s, try 'umount %s' manually.", err, s.mountPoint)
+		log.Errorf("Failed to unmount: %s, try '/usr/bin/fusermount -u %s' manually.", err, s.mountPoint)
 	}
 
 	os.Exit(0)

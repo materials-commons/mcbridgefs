@@ -509,7 +509,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 		err = tx.Model(&mcmodel.GlobusRequestFile{}).
 			Where("file_id = ?", mcToUpdate.ID).
-			Update("state", "inactive").Error
+			Update("state", "done").Error
 		if err != nil {
 			return err
 		}

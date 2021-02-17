@@ -27,7 +27,7 @@ func (m *ClosedGlobusRequestMonitor) Start() {
 
 func (m *ClosedGlobusRequestMonitor) monitorGlobusRequestState() {
 	for {
-		if m.handledClosedOrDeletedRequest() {
+		if m.globusRequestIsClosedOrDeleted() {
 			break
 		}
 		select {
@@ -39,30 +39,25 @@ func (m *ClosedGlobusRequestMonitor) monitorGlobusRequestState() {
 	}
 }
 
-func (m *ClosedGlobusRequestMonitor) handledClosedOrDeletedRequest() bool {
+func (m *ClosedGlobusRequestMonitor) globusRequestIsClosedOrDeleted() bool {
 	var request mcmodel.GlobusRequest
-	result := m.db.Find(&request, m.globusRequest.ID)
+	result := m.db.First(&request, m.globusRequest.ID)
 	switch {
 	case errors.Is(result.Error, gorm.ErrRecordNotFound):
 		// Request no longer exists so break out of monitoring
+		log.Infof("GlobusRequest %d removed from database", m.globusRequest.ID)
+		m.handleClosedRequestFn()
 		return true
 	case result.Error != nil:
 		// (Hopefully) transient error on database
-		log.Warnf("Error querying database: %s", result.Error)
+		log.Errorf("Error querying database: %s\n", result.Error)
 		return false
 	case request.State == "closed":
 		// Request state marked as closed, perform cleanup
 		m.handleClosedRequestFn()
 		return true
-	case request.State == "unmounted":
-		// This state should never occur
-		log.Errorf("Monitor saw impossible state 'unmounted', shutting down bridge...")
-		return true
-	case request.State == "loading":
-		log.Errorf("Monitor saw impossible state 'loading', shutting down bridge...")
-		return true
 	default:
-		// If we are here then we found the request, but its state is still open and active
+		// If we are here then we found the request, but its still active
 		return false
 	}
 }

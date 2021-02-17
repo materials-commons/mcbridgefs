@@ -9,3 +9,7 @@ bin: cli
 
 cli:
 	(cd ./cmd/mcbridgefs; go build)
+
+deploy: cli
+	sudo cp cmd/mcbridgefs/mcbridgefs /usr/local/bin
+	sudo cp mcbridgefs.sh /usr/local/bin

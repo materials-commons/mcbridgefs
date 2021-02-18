@@ -1,4 +1,4 @@
-package mcbridgefs
+package monitor
 
 import (
 	"context"

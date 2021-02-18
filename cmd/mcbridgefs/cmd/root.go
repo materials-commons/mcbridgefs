@@ -21,8 +21,8 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/gomcdb/mcmodel"
-	mcbridge "github.com/materials-commons/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
+	"github.com/materials-commons/mcbridgefs/monitor"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -110,7 +110,7 @@ file versions and consistency for the project that the globus request is associa
 			server.c <- syscall.SIGINT
 		}
 
-		closedRequestMonitor := mcbridge.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
+		closedRequestMonitor := monitor.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
 		closedRequestMonitor.Start()
 
 		go server.listenForUnmount(cancel)

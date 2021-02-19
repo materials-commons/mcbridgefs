@@ -144,16 +144,6 @@ github.com/magiconair/properties v1.8.1 h1:ZC2Vc7/ZFkGmsVC9KvOjumD+G5lXy2RtTKyzR
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0 h1:E8mAM30LpBxIbrSu1J09V2Bdx3+7LI1AeDy5e2feHHg=
 github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0/go.mod h1:9Vxy/5aFD1rhUO5JlqZjfUik8MlZZExFSECirJGmK5w=
-github.com/materials-commons/gomcdb v0.0.0-20210127200722-b38d33783359 h1:pnQhiJa33J6F4SWBomJzDUVQFrGCTDbqwAYKiWPodX0=
-github.com/materials-commons/gomcdb v0.0.0-20210127200722-b38d33783359/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
-github.com/materials-commons/gomcdb v0.0.0-20210202183031-129ae91e0e2c h1:ppxkIxVtezqIZAhe5T4BlZkpgYzXsjS3y0FYI2KoD3Q=
-github.com/materials-commons/gomcdb v0.0.0-20210202183031-129ae91e0e2c/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
-github.com/materials-commons/gomcdb v0.0.0-20210203155544-9b8ddc511c6d h1:BES/HTJ4/wDvoz2GTZD6ZkXbjSDTiODBUx6xSjkGEQo=
-github.com/materials-commons/gomcdb v0.0.0-20210203155544-9b8ddc511c6d/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
-github.com/materials-commons/gomcdb v0.0.0-20210205172044-b1c16e35eccb h1:eXr2m8Ds6ZyOLCHKdgWd/2Bgbd1VqBVAgOgHLcicH5E=
-github.com/materials-commons/gomcdb v0.0.0-20210205172044-b1c16e35eccb/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
-github.com/materials-commons/gomcdb v0.0.0-20210215185014-555ee373dc07 h1:WG6BhVDCpveiHGrzgB/13psEAbVkv6xKg3najstXxO4=
-github.com/materials-commons/gomcdb v0.0.0-20210215185014-555ee373dc07/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
 github.com/materials-commons/gomcdb v0.0.0-20210216195045-1ec4c957d46a h1:/IagyI/sMauYCulD5he9zSXEhyDfwSsccadfh7zjdQ8=
 github.com/materials-commons/gomcdb v0.0.0-20210216195045-1ec4c957d46a/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
 github.com/materials-commons/mc v0.0.0-20190920151351-e37fe638d79b h1:6QjhQLju1R1ISNWPvyT/Lq6OzniVfo2ZA0X5uEXldhE=

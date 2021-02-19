@@ -4,13 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/apex/log"
-	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/hashicorp/go-uuid"
-	"github.com/materials-commons/gomcdb/mcmodel"
-	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
-	"gorm.io/gorm"
 	"hash/fnv"
 	"mime"
 	"os"
@@ -20,6 +13,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/apex/log"
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/hashicorp/go-uuid"
+	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
+	"gorm.io/gorm"
 )
 
 type Node struct {

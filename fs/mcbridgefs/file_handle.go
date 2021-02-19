@@ -3,10 +3,11 @@ package mcbridgefs
 import (
 	"bytes"
 	"context"
-	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
 	"io"
 	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
 )
 
 // Code based on loopback file system from github.com/hanwen/go-fuse/v2/fs/file.go

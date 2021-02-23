@@ -43,9 +43,12 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 // Write overrides the BridgeFileHandle write to incorporate updating the checksum as bytes
 // are written to the file.
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	n, err := f.BridgeFileHandle.Write(ctx, data, off)
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+
+	n, err := syscall.Pwrite(f.Fd, data, off)
 	if err != fs.OK {
-		return n, fs.ToErrno(err)
+		return uint32(n), fs.ToErrno(err)
 	}
 
 	file := openedFilesTracker.Get(f.Path)
@@ -53,5 +56,9 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 		_, _ = io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
 	}
 
-	return n, fs.OK
+	return uint32(n), fs.OK
+}
+
+func (f *FileHandle) Flush(ctx context.Context) syscall.Errno {
+	return fs.OK
 }

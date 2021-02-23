@@ -39,6 +39,14 @@ func (n *Node) ToPath() *Path {
 	return ToPath(filepath.Join("/", basePath))
 }
 
+func (p *Path) ToFilePath(name string) string {
+	return filepath.Join(p.Path, name)
+}
+
+func (p *Path) ToFSPath(name string) string {
+	return filepath.Join("/", p.Email, fmt.Sprintf("%d", p.ProjectID), p.Path, name)
+}
+
 func ToPath(p string) *Path {
 	pathParts := strings.SplitN(p, "/", 4)
 

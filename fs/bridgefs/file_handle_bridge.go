@@ -6,9 +6,10 @@ package bridgefs
 
 import (
 	"context"
-	"fmt"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"sync"
+
+	"github.com/apex/log"
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"syscall"
 
@@ -44,7 +45,7 @@ var _ = (fs.FileSetattrer)((*BridgeFileHandle)(nil))
 var _ = (fs.FileAllocater)((*BridgeFileHandle)(nil))
 
 func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
-	fmt.Println("BridgeFileHandle Read")
+	log.Debug("BridgeFileHandle Read")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	r := fuse.ReadResultFd(uintptr(f.Fd), off, len(buf))
@@ -52,7 +53,7 @@ func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res
 }
 
 func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	fmt.Println("BridgeFileHandle Write")
+	log.Debug("BridgeFileHandle Write")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	n, err := syscall.Pwrite(f.Fd, data, off)
@@ -60,7 +61,7 @@ func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 }
 
 func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
-	fmt.Println("BridgeFileHandle Release")
+	log.Debug("BridgeFileHandle Release")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	if f.Fd != -1 {
@@ -72,7 +73,7 @@ func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
 }
 
 func (f *BridgeFileHandle) Flush(ctx context.Context) syscall.Errno {
-	fmt.Println("BridgeFileHandle Flush")
+	log.Debug("BridgeFileHandle Flush")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	// Since Flush() may be called for each dup'd Fd, we don't
@@ -152,7 +153,7 @@ func (f *BridgeFileHandle) setLock(ctx context.Context, owner uint64, lk *fuse.F
 }
 
 func (f *BridgeFileHandle) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	fmt.Println("BridgeFileHandle Setattr")
+	log.Debug("BridgeFileHandle Setattr")
 	if errno := f.setAttr(ctx, in); errno != 0 {
 		return errno
 	}
@@ -217,6 +218,7 @@ func (f *BridgeFileHandle) setAttr(ctx context.Context, in *fuse.SetAttrIn) sysc
 }
 
 func (f *BridgeFileHandle) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno {
+	log.Debug("BridgeFileHandle Getattr")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	st := syscall.Stat_t{}

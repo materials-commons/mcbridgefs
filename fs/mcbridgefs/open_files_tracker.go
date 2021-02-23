@@ -2,9 +2,10 @@ package mcbridgefs
 
 import (
 	"crypto/md5"
-	"github.com/materials-commons/gomcdb/mcmodel"
 	"hash"
 	"sync"
+
+	"github.com/materials-commons/gomcdb/mcmodel"
 )
 
 type OpenFilesTracker struct {

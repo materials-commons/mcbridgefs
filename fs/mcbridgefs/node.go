@@ -29,11 +29,10 @@ type Node struct {
 }
 
 var (
-	uid, gid      uint32
-	MCFSRoot      string
-	DB            *gorm.DB
-	globusRequest mcmodel.GlobusRequest
-	//openedFilesTracker sync.Map
+	uid, gid           uint32
+	MCFSRoot           string
+	DB                 *gorm.DB
+	globusRequest      mcmodel.GlobusRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 )

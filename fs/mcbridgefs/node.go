@@ -192,28 +192,65 @@ func (n *Node) Opendir(ctx context.Context) syscall.Errno {
 // Getxattr returns extra attributes. This is used by lstat. There are no extra attributes to
 // return so we always return a 0 for buffer length and success.
 func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	//fmt.Println("Getxattr")
 	return 0, fs.OK
 }
 
 // Getattr gets attributes about the file
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	now := time.Now()
+	//fmt.Println("Getattr:", n.Path(n.Root()), n.IsDir())
+	if n.IsDir() {
+		now := time.Now()
 
-	// Owner is always the process the bridge is running as
-	out.Uid = uid
-	out.Gid = gid
+		// Owner is always the process the bridge is running as
+		out.Uid = uid
+		out.Gid = gid
 
-	if n.file == nil {
-		// We don't have a cached version of the file, so just return some default info
 		out.SetTimes(&now, &now, &now)
 		return fs.OK
 	}
 
-	// If we are here then we have a cached version of file so use that to determine some
-	// of the meta data
+	var dir mcmodel.File
+	path := filepath.Join("/", filepath.Dir(n.Path(n.Root())))
+	err := DB.Where("project_id = ?", globusRequest.ProjectID).
+		Where("path = ?", path).
+		First(&dir).Error
+	if err != nil {
+		return syscall.ENOENT
+	}
 
-	// Last access and change of status is always time.Now()
-	out.SetTimes(&now, &n.file.UpdatedAt, &now)
+	name := filepath.Base(n.Path(n.Root()))
+	var gf mcmodel.GlobusRequestFile
+	var file mcmodel.File
+	err = DB.Preload("File").
+		Where("directory_id = ?", dir.ID).
+		Where("name = ?", name).
+		First(&gf).Error
+
+	if err == nil && gf.File != nil {
+		// Found a version of the file that is being uploaded so return it
+		file = *gf.File
+	} else {
+		if err := DB.Where("directory_id = ?", dir.ID).
+			Where("name = ?", name).
+			Where("current = ?", true).
+			First(&file).Error; err != nil {
+			return syscall.ENOENT
+		}
+	}
+
+	st := syscall.Stat_t{}
+	err = syscall.Lstat(file.ToUnderlyingFilePath(MCFSRoot), &st)
+
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+
+	out.FromStat(&st)
+
+	// Owner is always the process the bridge is running as
+	out.Uid = uid
+	out.Gid = gid
 
 	return fs.OK
 }
@@ -222,7 +259,6 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	f, err := n.lookupEntry(name)
 	if err != nil {
-		//log.Errorf("lookupEntry (%s) failed: %s\n", name, err)
 		return nil, syscall.ENOENT
 	}
 
@@ -296,7 +332,6 @@ func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
 // the existing directory rather than returning an error.
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	fmt.Printf("Mkdir %s/%s\n", n.Path(n.Root()), name)
 	path := filepath.Join("/", n.Path(n.Root()), name)
 	var dir mcmodel.File
 
@@ -354,8 +389,6 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 // Create will create a new file. At this point the file shouldn't exist. However, because multiple users could be
 // uploading files, there is a chance it does exist. If that happens then a new version of the file is created instead.
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	timeStart := time.Now()
-	fmt.Println("Node Create: ", name)
 	f, err := n.createNewMCFile(name)
 	if err != nil {
 		return nil, nil, 0, syscall.EIO
@@ -367,9 +400,9 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	fd, err := syscall.Open(f.ToUnderlyingFilePath(MCFSRoot), int(flags)|os.O_CREATE, mode)
 	if err != nil {
 		log.Errorf("    Create - syscall.Open failed:", err)
-
 		return nil, nil, 0, syscall.EIO
 	}
+
 	statInfo := syscall.Stat_t{}
 	if err := syscall.Fstat(fd, &statInfo); err != nil {
 		// TODO - Remove newly created file version in db
@@ -380,13 +413,11 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	node := n.newNode()
 	node.file = f
 	out.FromStat(&statInfo)
-	fmt.Printf("Create for %s took %d milliseconds...\n", f.Name, time.Now().Sub(timeStart).Milliseconds())
 	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), NewFileHandle(fd, flags, path), 0, fs.OK
 }
 
 // Open will open an existing file.
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	timeStart := time.Now()
 	var (
 		err     error
 		newFile *mcmodel.File
@@ -402,9 +433,9 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 			newFile, err = n.createNewMCFileVersion()
 			if err != nil {
 				// TODO: What error should be returned?
-				fmt.Println("       createNewMCFileVersion() O_WRONLY failed:", err)
 				return nil, 0, syscall.EIO
 			}
+
 			openedFilesTracker.Store(path, newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
@@ -415,7 +446,6 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 			newFile, err = n.createNewMCFileVersion()
 			if err != nil {
 				// TODO: What error should be returned?
-				fmt.Println("    createNewMCFileVersion() O_RDWR failed:", err)
 				return nil, 0, syscall.EIO
 			}
 			openedFilesTracker.Store(path, newFile)
@@ -423,7 +453,6 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND
 	default:
-		//fmt.Println("    Open flags Invalid")
 		return
 	}
 
@@ -433,11 +462,10 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	}
 	fd, err := syscall.Open(filePath, int(flags), 0)
 	if err != nil {
-		fmt.Printf("   syscall.Open failed, err = %s\n", err)
 		return nil, 0, fs.ToErrno(err)
 	}
+
 	fhandle := NewFileHandle(fd, flags, path)
-	fmt.Printf("Open for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fhandle, 0, fs.OK
 }
 
@@ -455,7 +483,6 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 // Release will close the file handle and update meta data about the file in the database
 func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	var newFile *mcmodel.File = nil
-	timeStart := time.Now()
 	bridgeFH, ok := f.(fs.FileReleaser)
 	if !ok {
 		return syscall.EINVAL
@@ -489,7 +516,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	fi, err := os.Stat(path)
 	if err != nil {
-		fmt.Printf("os.Stat %s failed: %s\n", path, err)
+		log.Errorf("os.Stat %s failed: %s\n", path, err)
 		return fs.ToErrno(err)
 	}
 
@@ -533,7 +560,6 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	// TODO: If there is already a file with matching checksum then we can delete this upload and set this file to
 	// point at the already uploaded file.
 
-	log.Infof("Release for %s took %d milliseconds...\n", n.file.Name, time.Now().Sub(timeStart).Milliseconds())
 	return fs.ToErrno(err)
 }
 

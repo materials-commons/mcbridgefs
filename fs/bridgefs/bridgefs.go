@@ -107,7 +107,6 @@ type BridgeNode struct {
 }
 
 var _ = (fs.NodeStatfser)((*BridgeNode)(nil))
-var _ = (fs.NodeStatfser)((*BridgeNode)(nil))
 var _ = (fs.NodeGetattrer)((*BridgeNode)(nil))
 var _ = (fs.NodeGetxattrer)((*BridgeNode)(nil))
 var _ = (fs.NodeSetxattrer)((*BridgeNode)(nil))

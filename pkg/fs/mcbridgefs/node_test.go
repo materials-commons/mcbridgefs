@@ -2,13 +2,14 @@ package mcbridgefs
 
 import (
 	"fmt"
-	"github.com/hashicorp/go-uuid"
-	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/go-uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWrite100ThousandFiles(t *testing.T) {
@@ -55,8 +56,4 @@ func TestFTruncateFile(t *testing.T) {
 	require.NoError(t, err, "Ftruncate failed: %s", err)
 	err = syscall.Close(fd)
 	require.NoError(t, err, "Close failed: %s", err)
-}
-
-func TestTruncateFile(t *testing.T) {
-
 }

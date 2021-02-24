@@ -19,7 +19,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/hashicorp/go-uuid"
 	"github.com/materials-commons/gomcdb/mcmodel"
-	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
 	"gorm.io/gorm"
 )
 

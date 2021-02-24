@@ -3,8 +3,9 @@ package monitor
 import (
 	"context"
 	"errors"
-	"github.com/materials-commons/gomcdb/mcmodel"
 	"time"
+
+	"github.com/materials-commons/gomcdb/mcmodel"
 
 	"github.com/apex/log"
 	"gorm.io/gorm"

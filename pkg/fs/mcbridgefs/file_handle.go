@@ -7,7 +7,7 @@ import (
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/materials-commons/mcbridgefs/fs/bridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
 )
 
 // Code based on loopback file system from github.com/hanwen/go-fuse/v2/fs/file.go

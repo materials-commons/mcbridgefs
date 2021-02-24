@@ -2,11 +2,12 @@ package monitor
 
 import (
 	"context"
+	"strings"
+	"time"
+
 	"github.com/apex/log"
 	globus "github.com/materials-commons/goglobus"
 	"gorm.io/gorm"
-	"strings"
-	"time"
 )
 
 type GlobusTaskMonitor struct {

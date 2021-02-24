@@ -9,9 +9,10 @@ package bridgefs
 import (
 	"context"
 	"fmt"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"path/filepath"
 	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"golang.org/x/sys/unix"
 )

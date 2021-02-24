@@ -1,8 +1,9 @@
 package mcbridgefs
 
 import (
-	"github.com/materials-commons/gomcdb/mcmodel"
 	"strings"
+
+	"github.com/materials-commons/gomcdb/mcmodel"
 )
 
 func getDirectoriesToUpdate(dir mcmodel.File, newName string) {

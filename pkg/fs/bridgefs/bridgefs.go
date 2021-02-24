@@ -7,10 +7,11 @@ package bridgefs
 import (
 	"context"
 	"fmt"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 )

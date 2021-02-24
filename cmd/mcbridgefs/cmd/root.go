@@ -16,20 +16,21 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/gomcdb/mcmodel"
-	"github.com/materials-commons/mcbridgefs/fs/mcbridgefs"
-	"github.com/materials-commons/mcbridgefs/monitor"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/monitor"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 )

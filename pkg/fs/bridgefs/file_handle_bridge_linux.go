@@ -6,10 +6,11 @@ package bridgefs
 
 import (
 	"context"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 )

@@ -230,11 +230,13 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	f, err := n.createNewMCFile(name)
 	if err != nil {
+		log.Errorf("Create - failed creating new file (%s): %s", name, err)
 		return nil, nil, 0, syscall.EIO
 	}
 
 	path := filepath.Join("/", n.Path(n.Root()), name)
 	openedFilesTracker.Store(path, f)
+
 	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(f.ToUnderlyingFilePath(MCFSRoot), int(flags)|os.O_CREATE, mode)
 	if err != nil {

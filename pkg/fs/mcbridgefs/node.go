@@ -35,6 +35,7 @@ var (
 	globusRequest      mcmodel.GlobusRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
+	fileStore          *FileStore
 )
 
 func SetMCFSRoot(root string) {
@@ -43,6 +44,8 @@ func SetMCFSRoot(root string) {
 
 func SetDB(db *gorm.DB) {
 	DB = db
+	// TODO: Hack fix this
+	fileStore = NewFileStore(db)
 }
 
 func SetGlobusRequest(gr mcmodel.GlobusRequest) {
@@ -109,72 +112,18 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
-	var files []mcmodel.File
-	err = DB.Where("directory_id = ?", dir.ID).
-		Where("project_id", globusRequest.ProjectID).
-		Where("current = true").
-		Find(&files).Error
-
+	files, err := fileStore.ListDirectory(dir)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
-	// Get files that have been uploaded
-	var globusUploadedFiles []mcmodel.GlobusRequestFile
-	results := DB.Where("directory_id = ?", dir.ID).
-		Where("globus_request_id = ?", globusRequest.ID).
-		Find(&globusUploadedFiles)
-
-	uploadedFilesByName := make(map[string]*mcmodel.File)
-	if results.Error == nil && len(globusUploadedFiles) != 0 {
-		// Convert the files into a hashtable by name. Since we don't have the underlying mcmodel.File
-		// we create one on the fly only filling in the entries that will be needed to return the
-		// data about the directory. In this case all that is needed are the Name and the Directory (only
-		// Path off the directory). So for directory we use the single entry dirToUse. See comment at
-		// start of Readdir that explains this.
-		for _, requestFile := range globusUploadedFiles {
-			uploadedFilesByName[requestFile.Name] = &mcmodel.File{Name: requestFile.Name, Directory: dirToUse}
-		}
-	}
-
 	filesList := make([]fuse.DirEntry, 0, len(files))
-
-	// Build up the list of entries in the directory. First go through the list of matching file entries,
-	// and remove any names that match in uploadedFilesByName. The uploadedFilesByName hash contains files
-	// that are being written to. Some will be new files that haven't yet been set as current (so didn't
-	// show up in the query to get the files for that directory) and some are existing files that are
-	// being updated. The files that are being updated are removed from the uploadedFilesByName list.
-	for _, fileEntry := range files {
-		// If there is an entry in uploadedFilesByName then this overrides the directory listing as it means that
-		// a new version of the file has been uploaded.
-		if foundEntry, ok := uploadedFilesByName[fileEntry.Name]; ok {
-			fileEntry = *foundEntry
-
-			// Remove from the hash table because we are going to need to make one more pass through the
-			// uploadedFilesByName hash to pick up any newly uploaded files in the directory.
-			delete(uploadedFilesByName, fileEntry.Name)
-		}
-
-		// Assign dirToUse as the directory to use since we didn't retrieve the directory
-		// when getting the file.
-		fileEntry.Directory = dirToUse
-
+	for _, f := range files {
+		f.Directory = dirToUse
 		entry := fuse.DirEntry{
-			Mode: n.getMode(&fileEntry),
-			Name: fileEntry.Name,
-			Ino:  n.inodeHash(&fileEntry),
-		}
-
-		filesList = append(filesList, entry)
-	}
-
-	// Now go through the uploadedFilesByName hash table. At this point it only contains new files that
-	// are being written to by this globus instance.
-	for _, fileEntry := range uploadedFilesByName {
-		entry := fuse.DirEntry{
-			Mode: n.getMode(fileEntry),
-			Name: fileEntry.Name,
-			Ino:  n.inodeHash(fileEntry),
+			Mode: n.getMode(&f),
+			Name: f.Name,
+			Ino:  n.inodeHash(&f),
 		}
 
 		filesList = append(filesList, entry)
@@ -313,57 +262,20 @@ func (n *Node) lookupEntry(name string) (*mcmodel.File, error) {
 
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
-	var file mcmodel.File
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	err := DB.Preload("Directory").
-		Where("project_id = ?", globusRequest.ProjectID).
-		Where("path = ?", path).
-		First(&file).Error
-
-	if err != nil {
-		log.Errorf("Failed looking up directory in project %d, path %s: %s", globusRequest.ProjectID, path, err)
-		return nil, err
-	}
-
-	return &file, nil
+	return fileStore.FindDirByPath(globusRequest.ProjectID, path)
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
 // the existing directory rather than returning an error.
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	var dir mcmodel.File
-
 	parent, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.EINVAL
 	}
 
-	err = withTxRetry(func(tx *gorm.DB) error {
-		err := tx.Where("path = ", path).Where("project_id = ?", globusRequest.ProjectID).Find(&dir).Error
-		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-			// directory already exists no need to create
-			return nil
-		}
-
-		dir = mcmodel.File{
-			OwnerID:              globusRequest.OwnerID,
-			MimeType:             "directory",
-			MediaTypeDescription: "directory",
-			DirectoryID:          parent.ID,
-			Current:              true,
-			Path:                 path,
-			ProjectID:            globusRequest.ProjectID,
-			Name:                 name,
-		}
-
-		if dir.UUID, err = uuid.GenerateUUID(); err != nil {
-			return err
-		}
-
-		return tx.Create(&dir).Error
-
-	}, DB, txRetryCount)
+	dir, err := fileStore.CreateDirectory(parent.ID, path, name)
 
 	if err != nil {
 		return nil, syscall.EINVAL
@@ -376,8 +288,8 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 	out.SetTimes(&now, &now, &now)
 
 	node := n.newNode()
-	node.file = &dir
-	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(&dir), Ino: n.inodeHash(&dir)}), fs.OK
+	node.file = dir
+	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(dir), Ino: n.inodeHash(dir)}), fs.OK
 }
 
 func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
@@ -481,7 +393,6 @@ func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn,
 
 // Release will close the file handle and update meta data about the file in the database
 func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	var newFile *mcmodel.File = nil
 	bridgeFH, ok := f.(fs.FileReleaser)
 	if !ok {
 		return syscall.EINVAL
@@ -500,66 +411,20 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	// If we are here then the file was opened with a write flag. In this case we need to update the
 	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
-	path := n.file.ToUnderlyingFilePath(MCFSRoot)
-	mcToUpdate := n.file
+	// TODO: is n.file every valid anymore?
+	fileToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
 	nf := openedFilesTracker.Get(fpath)
+	if nf != nil && nf.File != nil {
+		fileToUpdate = nf.File
+	}
+
+	var checksum string
 	if nf != nil {
-		newFile = nf.File
+		checksum = fmt.Sprintf("%x", nf.hasher.Sum(nil))
 	}
 
-	if newFile != nil {
-		path = newFile.ToUnderlyingFilePath(MCFSRoot)
-		mcToUpdate = newFile
-	}
-
-	fi, err := os.Stat(path)
-	if err != nil {
-		log.Errorf("os.Stat %s failed: %s\n", path, err)
-		return fs.ToErrno(err)
-	}
-
-	checksum := fmt.Sprintf("%x", nf.hasher.Sum(nil))
-
-	// Update the meta data and set the file to be the current version.
-	err = withTxRetry(func(tx *gorm.DB) error {
-		// To set file as the current (ie viewable) version we first need to set all its previous
-		// versions to have current set to false.
-		err := tx.Model(&mcmodel.File{}).
-			Where("directory_id = ?", n.file.DirectoryID).
-			Where("name = ?", n.file.Name).
-			Update("current", false).Error
-
-		if err != nil {
-			return err
-		}
-
-		err = tx.Model(&mcmodel.GlobusRequestFile{}).
-			Where("file_id = ?", mcToUpdate.ID).
-			Update("state", "done").Error
-		if err != nil {
-			return err
-		}
-
-		// Now we can update the meta data on the current file. This includes, the size, current, and if there is
-		// a new computed checksum, also update the checksum field.
-		if checksum != "" {
-			return tx.Model(mcToUpdate).Updates(mcmodel.File{
-				Size:     uint64(fi.Size()),
-				Current:  true,
-				Checksum: checksum,
-			}).Error
-		}
-
-		// If we are here then the file was opened for read/write but it was never written to. In this situation there
-		// is no checksum that has been computed, so don't update the field.
-		return tx.Model(mcToUpdate).Updates(mcmodel.File{Size: uint64(fi.Size()), Current: true}).Error
-	}, DB, txRetryCount)
-
-	// TODO: If there is already a file with matching checksum then we can delete this upload and set this file to
-	// point at the already uploaded file.
-
-	return fs.ToErrno(err)
+	return fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum))
 }
 
 // createNewMCFileVersion creates a new file version if there isn't already a version of the file
@@ -590,14 +455,8 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	newFile, err = addFileToDatabase(newFile, n.file.DirectoryID)
+	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory)
 	if err != nil {
-		return nil, err
-	}
-
-	// Try to make the directory path where the file will go
-	if err := os.MkdirAll(newFile.ToUnderlyingDirPath(MCFSRoot), 0755); err != nil {
-		log.Errorf("os.MkdirAll failed (%s): %s\n", newFile.ToUnderlyingDirPath(MCFSRoot), err)
 		return nil, err
 	}
 
@@ -610,8 +469,6 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	}
 	defer f.Close()
 
-	newFile.Directory = n.file.Directory
-
 	return newFile, nil
 }
 
@@ -623,7 +480,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		return nil, err
 	}
 
-	newFile := &mcmodel.File{
+	file := &mcmodel.File{
 		ProjectID:   globusRequest.ProjectID,
 		Name:        name,
 		DirectoryID: dir.ID,
@@ -634,18 +491,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	if newFile, err = addFileToDatabase(newFile, dir.ID); err != nil {
-		return nil, err
-	}
-
-	// Try to make the directory path where the file will go
-	if err := os.MkdirAll(newFile.ToUnderlyingDirPath(MCFSRoot), 0755); err != nil {
-		log.Errorf("os.MkdirAll failed (%s): %s\n", newFile.ToUnderlyingDirPath(MCFSRoot), err)
-		return nil, err
-	}
-
-	newFile.Directory = dir
-	return newFile, nil
+	return fileStore.CreateNewFile(file, dir)
 }
 
 // addFileToDatabase will add an mcmodel.File entry and an associated mcmodel.GlobusRequestFile entry

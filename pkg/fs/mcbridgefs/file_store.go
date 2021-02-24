@@ -3,6 +3,7 @@ package mcbridgefs
 import (
 	"errors"
 	"os"
+	"path/filepath"
 
 	"github.com/apex/log"
 	"github.com/hashicorp/go-uuid"
@@ -16,8 +17,8 @@ type FileStore struct {
 	globusRequest *mcmodel.GlobusRequest
 }
 
-func NewFileStore(db *gorm.DB) *FileStore {
-	return &FileStore{db: db}
+func NewFileStore(db *gorm.DB, mcfsRoot string, globusRequest *mcmodel.GlobusRequest) *FileStore {
+	return &FileStore{db: db, mcfsRoot: mcfsRoot, globusRequest: globusRequest}
 }
 
 func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error {
@@ -198,15 +199,51 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	for _, fileEntry := range files {
 		// Keep only uploaded files that are new
 		if _, ok := uploadedFilesByName[fileEntry.Name]; ok {
-			// File with name already exists in files list, so skip
-			continue
+			// File with name already exists in files list so delete
+			delete(uploadedFilesByName, fileEntry.Name)
 		}
+	}
 
-		// Completely new file uploaded to directory (not new version of existing file)
+	// Now add in all the upload files that didn't already exist
+	for _, fileEntry := range uploadedFilesByName {
 		files = append(files, fileEntry)
 	}
 
 	return files, nil
 }
 
-//func (s *FileStore) GetFileByPath()
+func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
+	// Get directory so we can use its id for lookups
+	dirPath := filepath.Dir(path)
+	fileName := filepath.Base(path)
+	var dir mcmodel.File
+	err := s.db.Where("project_id = ?", s.globusRequest.ProjectID).
+		Where("path = ?", dirPath).
+		First(&dir).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// We have the directory, so first check if there is an existing
+	// upload for that file
+	var globusRequestFile mcmodel.GlobusRequestFile
+	err = s.db.Preload("File.Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("globus_request_id = ?", s.globusRequest.ID).
+		Where("name = ?", fileName).
+		First(&globusRequestFile).Error
+	if err == nil && globusRequestFile.File != nil {
+		// Found file in the globus request file
+		return globusRequestFile.File, nil
+	}
+
+	// If we are here then lookup the file in the project
+	var file mcmodel.File
+	err = s.db.Preload("Directory").
+		Where("directory_id = ?", dir.ID).
+		Where("name = ?", fileName).
+		Where("current = ?", true).
+		First(&file).Error
+
+	return &file, err
+}

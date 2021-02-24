@@ -2,7 +2,6 @@ package mcbridgefs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"mime"
@@ -17,7 +16,6 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/hashicorp/go-uuid"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
 	"gorm.io/gorm"
@@ -38,18 +36,11 @@ var (
 	fileStore          *FileStore
 )
 
-func SetMCFSRoot(root string) {
-	MCFSRoot = root
-}
-
-func SetDB(db *gorm.DB) {
+func InitFS(mcfsRoot string, db *gorm.DB, gr mcmodel.GlobusRequest) {
+	MCFSRoot = mcfsRoot
 	DB = db
-	// TODO: Hack fix this
-	fileStore = NewFileStore(db)
-}
-
-func SetGlobusRequest(gr mcmodel.GlobusRequest) {
 	globusRequest = gr
+	fileStore = NewFileStore(db, mcfsRoot, &globusRequest)
 }
 
 func init() {
@@ -147,65 +138,38 @@ func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, 
 // Getattr gets attributes about the file
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	//fmt.Println("Getattr:", n.Path(n.Root()), n.IsDir())
-	if n.IsDir() {
-		now := time.Now()
-
-		// Owner is always the process the bridge is running as
-		out.Uid = uid
-		out.Gid = gid
-
-		out.SetTimes(&now, &now, &now)
-		return fs.OK
-	}
-
-	var dir mcmodel.File
-	path := filepath.Join("/", filepath.Dir(n.Path(n.Root())))
-	err := DB.Where("project_id = ?", globusRequest.ProjectID).
-		Where("path = ?", path).
-		First(&dir).Error
-	if err != nil {
-		return syscall.ENOENT
-	}
-
-	name := filepath.Base(n.Path(n.Root()))
-	var gf mcmodel.GlobusRequestFile
-	var file mcmodel.File
-	err = DB.Preload("File").
-		Where("directory_id = ?", dir.ID).
-		Where("name = ?", name).
-		First(&gf).Error
-
-	if err == nil && gf.File != nil {
-		// Found a version of the file that is being uploaded so return it
-		file = *gf.File
-	} else {
-		if err := DB.Where("directory_id = ?", dir.ID).
-			Where("name = ?", name).
-			Where("current = ?", true).
-			First(&file).Error; err != nil {
-			return syscall.ENOENT
-		}
-	}
-
-	st := syscall.Stat_t{}
-	err = syscall.Lstat(file.ToUnderlyingFilePath(MCFSRoot), &st)
-
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-
-	out.FromStat(&st)
 
 	// Owner is always the process the bridge is running as
 	out.Uid = uid
 	out.Gid = gid
+
+	if n.IsDir() {
+		now := time.Now()
+		out.SetTimes(&now, &now, &now)
+		return fs.OK
+	}
+
+	file, err := fileStore.GetFileByPath(filepath.Join("/", n.Path(n.Root())))
+	if err != nil {
+		log.Errorf("Getattr: GetFileByPath failed (%s): %s\n", filepath.Join("/", n.Path(n.Root())), err)
+		return syscall.ENOENT
+	}
+
+	st := syscall.Stat_t{}
+	if err := syscall.Lstat(file.ToUnderlyingFilePath(MCFSRoot), &st); err != nil {
+		log.Errorf("Getattr: Lstat failed (%s): %s\n", file.ToUnderlyingFilePath(MCFSRoot), err)
+		return fs.ToErrno(err)
+	}
+
+	out.FromStat(&st)
 
 	return fs.OK
 }
 
 // Lookup will return information about the current entry.
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	f, err := n.lookupEntry(name)
+	path := filepath.Join("/", n.Path(n.Root()), name)
+	f, err := fileStore.GetFileByPath(path)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -222,42 +186,6 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	node := n.newNode()
 	node.file = f
 	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), fs.OK
-}
-
-// lookupEntry will look for a file in the directory pointed at by the node. It handles the case
-// where a new version of the file has been created for this globus instance.
-func (n *Node) lookupEntry(name string) (*mcmodel.File, error) {
-	// Look for the nodes directory
-	dir, err := n.getMCDir("")
-	if err != nil {
-		return nil, err
-	}
-
-	// First check if there is a new file being uploaded for this entry. If that is the case
-	// then return that file information. This entry represents this globus instances unique
-	// version of the file.
-	var gf mcmodel.GlobusRequestFile
-	err = DB.Preload("File.Directory").
-		Where("directory_id = ?", dir.ID).
-		Where("name = ?", name).
-		First(&gf).Error
-
-	if err == nil {
-		// Found a version of the file that is being uploaded so return it
-		return gf.File, nil
-	}
-
-	// If we are here then there is not a new version of the file being written, so look up existing. The lookup
-	// to the database always has to be performed because a newer version may have been uploaded using the
-	// web upload, or by a different user using globus.
-	var f mcmodel.File
-	err = DB.Preload("Directory").
-		Where("directory_id = ?", dir.ID).
-		Where("name = ?", name).
-		Where("current = ?", true).
-		First(&f).Error
-
-	return &f, err
 }
 
 // getMCDir looks a directory up in the database.
@@ -492,59 +420,6 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 	}
 
 	return fileStore.CreateNewFile(file, dir)
-}
-
-// addFileToDatabase will add an mcmodel.File entry and an associated mcmodel.GlobusRequestFile entry
-// to the database. The file parameter must be filled out, except for the UUID which will be generated
-// for the file. The GlobusRequestFile will be created based on the file entry.
-func addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.File, error) {
-	var (
-		err               error
-		globusRequestUUID string
-	)
-
-	if file.UUID, err = uuid.GenerateUUID(); err != nil {
-		return nil, err
-	}
-
-	if globusRequestUUID, err = uuid.GenerateUUID(); err != nil {
-		return nil, err
-	}
-
-	// Wrap creation in a transaction so that both the file and the GlobusRequestFile are either
-	// both created, or neither is created.
-	err = withTxRetry(func(tx *gorm.DB) error {
-		result := tx.Create(file)
-
-		if result.Error != nil {
-			return result.Error
-		}
-
-		if result.RowsAffected != 1 {
-			// TODO: Fix this error
-			return errors.New("incorrect rows affected")
-		}
-
-		// Create a new globus request file entry to account for the new file
-		globusRequestFile := mcmodel.GlobusRequestFile{
-			ProjectID:       globusRequest.ProjectID,
-			OwnerID:         file.OwnerID,
-			GlobusRequestID: globusRequest.ID,
-			Name:            file.Name,
-			DirectoryID:     dirID,
-			FileID:          file.ID,
-			State:           "uploading",
-			UUID:            globusRequestUUID,
-		}
-
-		return tx.Create(&globusRequestFile).Error
-	}, DB, txRetryCount)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return file, nil
 }
 
 // getMimeType will determine the type of a file from its extension. It strips out the extra information

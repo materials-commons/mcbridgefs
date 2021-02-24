@@ -100,9 +100,7 @@ file versions and consistency for the project that the globus request is associa
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		mcbridgefs.SetDB(db)
-		mcbridgefs.SetGlobusRequest(globusRequest)
-		mcbridgefs.SetMCFSRoot(mcfsDir)
+		mcbridgefs.InitFS(mcfsDir, db, globusRequest)
 
 		rootNode := mcbridgefs.RootNode()
 		server := mustMount(args[0], rootNode)

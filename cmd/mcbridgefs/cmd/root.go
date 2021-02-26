@@ -103,7 +103,7 @@ file versions and consistency for the project that the transfer request is assoc
 		mcbridgefs.InitFS(mcfsDir, db, transferRequest)
 
 		rootNode := mcbridgefs.RootNode()
-		server := mustMount(args[0], rootNode)
+		server := mustStartFuseFileServer(args[0], rootNode)
 
 		onClose := func() {
 			server.c <- syscall.SIGINT
@@ -127,7 +127,7 @@ type Server struct {
 	c          chan os.Signal
 }
 
-func mustMount(mountPoint string, root *mcbridgefs.Node) *Server {
+func mustStartFuseFileServer(mountPoint string, root *mcbridgefs.Node) *Server {
 	opts := &fs.Options{
 		AttrTimeout:  &timeout,
 		EntryTimeout: &timeout,

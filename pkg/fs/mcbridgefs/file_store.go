@@ -69,7 +69,7 @@ func (s *FileStore) CreateNewFile(file, dir *mcmodel.File) (*mcmodel.File, error
 		return file, err
 	}
 
-	if err := os.MkdirAll(file.ToUnderlyingDirPath(MCFSRoot), 0755); err != nil {
+	if err := os.MkdirAll(file.ToUnderlyingDirPath(s.mcfsRoot), 0755); err != nil {
 		// TODO: If this fails then we should remove the created file from the database
 		log.Errorf("os.MkdirAll failed (%s): %s\n", file.ToUnderlyingDirPath(s.mcfsRoot), err)
 		return nil, err
@@ -125,7 +125,7 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.F
 
 func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, error) {
 	var dir mcmodel.File
-	err := DB.Preload("Directory").
+	err := s.db.Preload("Directory").
 		Where("project_id = ?", projectID).
 		Where("path = ?", path).
 		First(&dir).Error
@@ -171,7 +171,7 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string) (*mcmode
 func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	var files []mcmodel.File
 
-	err := DB.Where("directory_id = ?", dir.ID).
+	err := s.db.Where("directory_id = ?", dir.ID).
 		Where("project_id", s.transferRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
@@ -181,7 +181,7 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 
 	// Get files that have been uploaded
 	var uploadedFiles []mcmodel.TransferRequestFile
-	results := DB.Where("directory_id = ?", dir.ID).
+	results := s.db.Where("directory_id = ?", dir.ID).
 		Where("transfer_request_id = ?", s.transferRequest.ID).
 		Find(&uploadedFiles)
 	uploadedFilesByName := make(map[string]mcmodel.File)

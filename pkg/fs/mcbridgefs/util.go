@@ -18,7 +18,7 @@ func getAllDescendents(dir mcmodel.File) map[string]*mcmodel.File {
 	count := 0
 
 	var dirs []mcmodel.File
-	err := DB.Where("directory_id = ?", dir.ID).
+	err := db.Where("directory_id = ?", dir.ID).
 		Raw("where path is not null").
 		Find(&dirs).Error
 	if err != nil {
@@ -37,7 +37,7 @@ func getAllDescendents(dir mcmodel.File) map[string]*mcmodel.File {
 
 		count = len(directoriesToUpdate)
 
-		err = DB.Where("directory_id in ?", ids).
+		err = db.Where("directory_id in ?", ids).
 			Raw("where path is not null").
 			Find(&dirs).Error
 		if err != nil {

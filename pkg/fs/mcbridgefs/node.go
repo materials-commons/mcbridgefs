@@ -28,8 +28,8 @@ type Node struct {
 
 var (
 	uid, gid           uint32
-	MCFSRoot           string
-	DB                 *gorm.DB
+	mcfsRoot           string
+	db                 *gorm.DB
 	transferRequest    mcmodel.TransferRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
@@ -62,11 +62,11 @@ func init() {
 	openedFilesTracker = NewOpenFilesTracker()
 }
 
-func CreateFS(mcfsRoot string, db *gorm.DB, tr mcmodel.TransferRequest) *Node {
-	MCFSRoot = mcfsRoot
-	DB = db
+func CreateFS(fsRoot string, dB *gorm.DB, tr mcmodel.TransferRequest) *Node {
+	mcfsRoot = fsRoot
+	db = dB
 	transferRequest = tr
-	fileStore = NewFileStore(db, mcfsRoot, &transferRequest)
+	fileStore = NewFileStore(dB, fsRoot, &transferRequest)
 	return rootNode()
 }
 
@@ -157,8 +157,8 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 	}
 
 	st := syscall.Stat_t{}
-	if err := syscall.Lstat(file.ToUnderlyingFilePath(MCFSRoot), &st); err != nil {
-		log.Errorf("Getattr: Lstat failed (%s): %s\n", file.ToUnderlyingFilePath(MCFSRoot), err)
+	if err := syscall.Lstat(file.ToUnderlyingFilePath(mcfsRoot), &st); err != nil {
+		log.Errorf("Getattr: Lstat failed (%s): %s\n", file.ToUnderlyingFilePath(mcfsRoot), err)
 		return fs.ToErrno(err)
 	}
 
@@ -239,7 +239,7 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	openedFilesTracker.Store(path, f)
 
 	flags = flags &^ syscall.O_APPEND
-	fd, err := syscall.Open(f.ToUnderlyingFilePath(MCFSRoot), int(flags)|os.O_CREATE, mode)
+	fd, err := syscall.Open(f.ToUnderlyingFilePath(mcfsRoot), int(flags)|os.O_CREATE, mode)
 	if err != nil {
 		log.Errorf("    Create - syscall.Open failed:", err)
 		return nil, nil, 0, syscall.EIO
@@ -298,9 +298,9 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		return
 	}
 
-	filePath := n.file.ToUnderlyingFilePath(MCFSRoot)
+	filePath := n.file.ToUnderlyingFilePath(mcfsRoot)
 	if newFile != nil {
-		filePath = newFile.ToUnderlyingFilePath(MCFSRoot)
+		filePath = newFile.ToUnderlyingFilePath(mcfsRoot)
 	}
 	fd, err := syscall.Open(filePath, int(flags), 0)
 	if err != nil {
@@ -391,10 +391,10 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 	}
 
 	// Create the empty file for new version
-	f, err := os.OpenFile(newFile.ToUnderlyingFilePath(MCFSRoot), os.O_RDWR|os.O_CREATE, 0755)
+	f, err := os.OpenFile(newFile.ToUnderlyingFilePath(mcfsRoot), os.O_RDWR|os.O_CREATE, 0755)
 
 	if err != nil {
-		log.Errorf("os.OpenFile failed (%s): %s\n", newFile.ToUnderlyingFilePath(MCFSRoot), err)
+		log.Errorf("os.OpenFile failed (%s): %s\n", newFile.ToUnderlyingFilePath(mcfsRoot), err)
 		return nil, err
 	}
 	defer f.Close()
@@ -452,7 +452,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 	}
 
 	var f mcmodel.File
-	err = DB.Preload("Directory").
+	err = db.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
 		Where("project_id = ?", transferRequest.ProjectID).
 		Where("name = ?", name).

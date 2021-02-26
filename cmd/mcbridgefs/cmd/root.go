@@ -93,8 +93,8 @@ file versions and consistency for the project that the transfer request is assoc
 			log.Fatalf("Unable to load TransferRequest id %d: %s", transferRequestID, result.Error)
 		}
 
-		if transferRequest.State != "new" {
-			log.Infof("TransferRequest %d state is not 'new' (state = %s), aborting", transferRequest.ID, transferRequest.State)
+		if transferRequest.State != "open" {
+			log.Infof("TransferRequest %d state is not 'open' (state = %s), aborting", transferRequest.ID, transferRequest.State)
 			os.Exit(0)
 		}
 

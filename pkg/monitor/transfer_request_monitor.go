@@ -11,42 +11,42 @@ import (
 	"gorm.io/gorm"
 )
 
-type ClosedGlobusRequestMonitor struct {
-	globusRequest         mcmodel.GlobusRequest
+type TransferRequestMonitor struct {
+	transferRequest       mcmodel.TransferRequest
 	db                    *gorm.DB
 	ctx                   context.Context
 	handleClosedRequestFn func()
 }
 
-func NewClosedGlobusRequestMonitor(db *gorm.DB, ctx context.Context, globusRequest mcmodel.GlobusRequest, handleFn func()) *ClosedGlobusRequestMonitor {
-	return &ClosedGlobusRequestMonitor{db: db, ctx: ctx, globusRequest: globusRequest, handleClosedRequestFn: handleFn}
+func NewTransferRequestMonitor(db *gorm.DB, ctx context.Context, transferRequest mcmodel.TransferRequest, handleFn func()) *TransferRequestMonitor {
+	return &TransferRequestMonitor{db: db, ctx: ctx, transferRequest: transferRequest, handleClosedRequestFn: handleFn}
 }
 
-func (m *ClosedGlobusRequestMonitor) Start() {
-	go m.monitorGlobusRequestState()
+func (m *TransferRequestMonitor) Start() {
+	go m.monitorTransferRequestState()
 }
 
-func (m *ClosedGlobusRequestMonitor) monitorGlobusRequestState() {
+func (m *TransferRequestMonitor) monitorTransferRequestState() {
 	for {
-		if m.globusRequestIsClosedOrDeleted() {
+		if m.transferRequestIsClosedOrDeleted() {
 			break
 		}
 		select {
 		case <-m.ctx.Done():
-			log.Infof("Shutting down globus request monitoring")
+			log.Infof("Shutting down transfer request monitor")
 			return
 		case <-time.After(10 * time.Second):
 		}
 	}
 }
 
-func (m *ClosedGlobusRequestMonitor) globusRequestIsClosedOrDeleted() bool {
-	var request mcmodel.GlobusRequest
-	result := m.db.First(&request, m.globusRequest.ID)
+func (m *TransferRequestMonitor) transferRequestIsClosedOrDeleted() bool {
+	var request mcmodel.TransferRequest
+	result := m.db.First(&request, m.transferRequest.ID)
 	switch {
 	case errors.Is(result.Error, gorm.ErrRecordNotFound):
 		// Request no longer exists so break out of monitoring
-		log.Infof("GlobusRequest %d removed from database", m.globusRequest.ID)
+		log.Infof("TransferRequest %d removed from database", m.transferRequest.ID)
 		m.handleClosedRequestFn()
 		return true
 	case result.Error != nil:

@@ -36,15 +36,15 @@ import (
 )
 
 var (
-	cfgFile         string
-	globusRequestID int
-	mcfsDir         string
+	cfgFile           string
+	transferRequestID int
+	mcfsDir           string
 )
 
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
-	rootCmd.PersistentFlags().IntVarP(&globusRequestID, "globus-request-id", "g", -1, "Globus request this mount is associated with")
+	rootCmd.PersistentFlags().IntVarP(&transferRequestID, "transfer-request-id", "t", -1, "Transfer request this mount is associated with")
 
 	mcfsDir = os.Getenv("MCFS_DIR")
 	if mcfsDir == "" {
@@ -61,17 +61,17 @@ func initConfig() {
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "mcbridgefs",
-	Short: "Create a file system for Globus to write to",
-	Long: `mcbridgefs creates a FUSE based file system to intercept Globus calls to the file system
-and present the Materials Commons storage in a way that Globus understands. It handles creating new
-file versions and consistency for the project that the globus request is associated with.`,
+	Short: "Create a file system for file transfers to read from/write to",
+	Long: `mcbridgefs creates a FUSE based file system to intercept transfers calls to the file system
+and present the Materials Commons storage as a traditional hierarchical file system. It handles creating new
+file versions and consistency for the project that the transfer request is associated with.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) != 1 {
 			log.Fatalf("No path specified for mount.")
 		}
 
-		if globusRequestID == -1 {
-			log.Fatalf("No globus request specified.")
+		if transferRequestID == -1 {
+			log.Fatalf("No transfer request specified.")
 		}
 
 		var (
@@ -87,20 +87,20 @@ file versions and consistency for the project that the globus request is associa
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		}
 
-		var globusRequest mcmodel.GlobusRequest
+		var transferRequest mcmodel.TransferRequest
 
-		if result := db.Preload("Owner").Find(&globusRequest, globusRequestID); result.Error != nil {
-			log.Fatalf("Unable to load GlobusRequest id %d: %s", globusRequestID, result.Error)
+		if result := db.Preload("Owner").Find(&transferRequest, transferRequestID); result.Error != nil {
+			log.Fatalf("Unable to load TransferRequest id %d: %s", transferRequestID, result.Error)
 		}
 
-		if globusRequest.State != "new" {
-			log.Infof("GlobusRequest %d state is not 'new' (state = %s), aborting", globusRequest.ID, globusRequest.State)
+		if transferRequest.State != "new" {
+			log.Infof("TransferRequest %d state is not 'new' (state = %s), aborting", transferRequest.ID, transferRequest.State)
 			os.Exit(0)
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		mcbridgefs.InitFS(mcfsDir, db, globusRequest)
+		mcbridgefs.InitFS(mcfsDir, db, transferRequest)
 
 		rootNode := mcbridgefs.RootNode()
 		server := mustMount(args[0], rootNode)
@@ -109,7 +109,7 @@ file versions and consistency for the project that the globus request is associa
 			server.c <- syscall.SIGINT
 		}
 
-		closedRequestMonitor := monitor.NewClosedGlobusRequestMonitor(db, ctx, globusRequest, onClose)
+		closedRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
 		closedRequestMonitor.Start()
 
 		go server.listenForUnmount(cancel)

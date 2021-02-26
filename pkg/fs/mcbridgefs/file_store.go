@@ -12,13 +12,13 @@ import (
 )
 
 type FileStore struct {
-	db            *gorm.DB
-	mcfsRoot      string
-	globusRequest *mcmodel.GlobusRequest
+	db              *gorm.DB
+	mcfsRoot        string
+	transferRequest *mcmodel.TransferRequest
 }
 
-func NewFileStore(db *gorm.DB, mcfsRoot string, globusRequest *mcmodel.GlobusRequest) *FileStore {
-	return &FileStore{db: db, mcfsRoot: mcfsRoot, globusRequest: globusRequest}
+func NewFileStore(db *gorm.DB, mcfsRoot string, transferRequest *mcmodel.TransferRequest) *FileStore {
+	return &FileStore{db: db, mcfsRoot: mcfsRoot, transferRequest: transferRequest}
 }
 
 func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error {
@@ -40,7 +40,7 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 			return err
 		}
 
-		err = tx.Model(&mcmodel.GlobusRequestFile{}).
+		err = tx.Model(&mcmodel.TransferRequestFile{}).
 			Where("file_id = ?", file.ID).
 			Update("state", "done").Error
 		if err != nil {
@@ -79,45 +79,45 @@ func (s *FileStore) CreateNewFile(file, dir *mcmodel.File) (*mcmodel.File, error
 	return file, nil
 }
 
-// addFileToDatabase will add an mcmodel.File entry and an associated mcmodel.GlobusRequestFile entry
+// addFileToDatabase will add an mcmodel.File entry and an associated mcmodel.TransferRequestFile entry
 // to the database. The file parameter must be filled out, except for the UUID which will be generated
-// for the file. The GlobusRequestFile will be created based on the file entry.
+// for the file. The TransferRequestFile will be created based on the file entry.
 // to the database. The file parameter must be filled out, except for the UUID which will be generated
-// for the file. The GlobusRequestFile will be created based on the file entry.
+// for the file. The TransferRequestFile will be created based on the file entry.
 func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.File, error) {
 	var (
-		err               error
-		globusRequestUUID string
+		err                 error
+		transferRequestUUID string
 	)
 
 	if file.UUID, err = uuid.GenerateUUID(); err != nil {
 		return nil, err
 	}
 
-	if globusRequestUUID, err = uuid.GenerateUUID(); err != nil {
+	if transferRequestUUID, err = uuid.GenerateUUID(); err != nil {
 		return nil, err
 	}
 
-	// Wrap creation in a transaction so that both the file and the GlobusRequestFile are either
+	// Wrap creation in a transaction so that both the file and the TransferRequestFile are either
 	// both created, or neither is created.
 	err = withTxRetry(func(tx *gorm.DB) error {
 		if result := tx.Create(file); result.Error != nil {
 			return result.Error
 		}
 
-		// Create a new globus request file entry to account for the new file
-		globusRequestFile := mcmodel.GlobusRequestFile{
-			ProjectID:       globusRequest.ProjectID,
-			OwnerID:         file.OwnerID,
-			GlobusRequestID: globusRequest.ID,
-			Name:            file.Name,
-			DirectoryID:     dirID,
-			FileID:          file.ID,
-			State:           "uploading",
-			UUID:            globusRequestUUID,
+		// Create a new transfer request file entry to account for the new file
+		transferRequestFile := mcmodel.TransferRequestFile{
+			ProjectID:         s.transferRequest.ProjectID,
+			OwnerID:           file.OwnerID,
+			TransferRequestID: s.transferRequest.ID,
+			Name:              file.Name,
+			DirectoryID:       dirID,
+			FileID:            file.ID,
+			State:             "uploading",
+			UUID:              transferRequestUUID,
 		}
 
-		return tx.Create(&globusRequestFile).Error
+		return tx.Create(&transferRequestFile).Error
 	}, s.db, txRetryCount)
 
 	return file, err
@@ -140,20 +140,20 @@ func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, er
 func (s *FileStore) CreateDirectory(parentDirID int, path, name string) (*mcmodel.File, error) {
 	var dir mcmodel.File
 	err := withTxRetry(func(tx *gorm.DB) error {
-		err := tx.Where("path = ", path).Where("project_id = ?", globusRequest.ProjectID).Find(&dir).Error
+		err := tx.Where("path = ", path).Where("project_id = ?", s.transferRequest.ProjectID).Find(&dir).Error
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
 			// directory already exists no need to create
 			return nil
 		}
 
 		dir = mcmodel.File{
-			OwnerID:              s.globusRequest.OwnerID,
+			OwnerID:              s.transferRequest.OwnerID,
 			MimeType:             "directory",
 			MediaTypeDescription: "directory",
 			DirectoryID:          parentDirID,
 			Current:              true,
 			Path:                 path,
-			ProjectID:            s.globusRequest.ProjectID,
+			ProjectID:            s.transferRequest.ProjectID,
 			Name:                 name,
 		}
 
@@ -172,7 +172,7 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	var files []mcmodel.File
 
 	err := DB.Where("directory_id = ?", dir.ID).
-		Where("project_id", s.globusRequest.ProjectID).
+		Where("project_id", s.transferRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
 	if err != nil {
@@ -180,18 +180,18 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	}
 
 	// Get files that have been uploaded
-	var globusUploadedFiles []mcmodel.GlobusRequestFile
+	var uploadedFiles []mcmodel.TransferRequestFile
 	results := DB.Where("directory_id = ?", dir.ID).
-		Where("globus_request_id = ?", s.globusRequest.ID).
-		Find(&globusUploadedFiles)
+		Where("transfer_request_id = ?", s.transferRequest.ID).
+		Find(&uploadedFiles)
 	uploadedFilesByName := make(map[string]mcmodel.File)
-	if results.Error == nil && len(globusUploadedFiles) != 0 {
+	if results.Error == nil && len(uploadedFiles) != 0 {
 		// Convert the files into a hashtable by name. Since we don't have the underlying mcmodel.File
 		// we create one on the fly only filling in the entries that will be needed to return the
 		// data about the directory. In this case all that is needed are the Name and the Directory (only
 		// Path off the directory). So for directory we use the single entry dirToUse. See comment at
 		// start of Readdir that explains this.
-		for _, requestFile := range globusUploadedFiles {
+		for _, requestFile := range uploadedFiles {
 			uploadedFilesByName[requestFile.Name] = mcmodel.File{Name: requestFile.Name}
 		}
 	}
@@ -217,7 +217,7 @@ func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
 	dirPath := filepath.Dir(path)
 	fileName := filepath.Base(path)
 	var dir mcmodel.File
-	err := s.db.Where("project_id = ?", s.globusRequest.ProjectID).
+	err := s.db.Where("project_id = ?", s.transferRequest.ProjectID).
 		Where("path = ?", dirPath).
 		First(&dir).Error
 	if err != nil {
@@ -226,15 +226,15 @@ func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
 
 	// We have the directory, so first check if there is an existing
 	// upload for that file
-	var globusRequestFile mcmodel.GlobusRequestFile
+	var transferRequestFile mcmodel.TransferRequestFile
 	err = s.db.Preload("File.Directory").
 		Where("directory_id = ?", dir.ID).
-		Where("globus_request_id = ?", s.globusRequest.ID).
+		Where("transfer_request_id = ?", s.transferRequest.ID).
 		Where("name = ?", fileName).
-		First(&globusRequestFile).Error
-	if err == nil && globusRequestFile.File != nil {
-		// Found file in the globus request file
-		return globusRequestFile.File, nil
+		First(&transferRequestFile).Error
+	if err == nil && transferRequestFile.File != nil {
+		// Found file in the transfer request file
+		return transferRequestFile.File, nil
 	}
 
 	// If we are here then lookup the file in the project

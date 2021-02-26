@@ -30,17 +30,17 @@ var (
 	uid, gid           uint32
 	MCFSRoot           string
 	DB                 *gorm.DB
-	globusRequest      mcmodel.GlobusRequest
+	transferRequest    mcmodel.TransferRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 	fileStore          *FileStore
 )
 
-func InitFS(mcfsRoot string, db *gorm.DB, gr mcmodel.GlobusRequest) {
+func InitFS(mcfsRoot string, db *gorm.DB, tr mcmodel.TransferRequest) {
 	MCFSRoot = mcfsRoot
 	DB = db
-	globusRequest = gr
-	fileStore = NewFileStore(db, mcfsRoot, &globusRequest)
+	transferRequest = tr
+	fileStore = NewFileStore(db, mcfsRoot, &transferRequest)
 }
 
 func init() {
@@ -89,7 +89,7 @@ func (n *Node) newNode() *Node {
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	// Directories can have a large amount of files. To speed up processing
 	// Readdir uses queries that don't retrieve either the underlying directory
-	// for a mcmodel.File, or the underlying file for a mcmodel.GlobusRequestFile.
+	// for a mcmodel.File, or the underlying file for a mcmodel.TransferRequestFile.
 	// However, the path for the directory is still needed. This is accessed
 	// off of the underlying mcmodel.File by the FullPath() routine which is
 	// used the inodeHash() and getMode() methods. To work around this we
@@ -191,7 +191,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	return fileStore.FindDirByPath(globusRequest.ProjectID, path)
+	return fileStore.FindDirByPath(transferRequest.ProjectID, path)
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
@@ -358,14 +358,13 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 // createNewMCFileVersion creates a new file version if there isn't already a version of the file
-// file associated with this globus request instance. It checks the openedFilesTracker to determine
+// file associated with this transfer request instance. It checks the openedFilesTracker to determine
 // if a new version has already been created. If a new version was already created then it will return
 // that version. Otherwise it will create a new version and add it to the OpenedFilesTracker. In
 // addition when a new version is created, the associated on disk directory is created and an empty
 // file is written to it.
 func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
-	// First check if there is already a version of this file being written to for this
-	// globus upload context.
+	// First check if there is already a version of this file being written to for this upload context.
 	existing := getFromOpenedFiles(filepath.Join("/", n.Path(n.Root()), n.file.Name))
 	if existing != nil {
 		return existing, nil
@@ -411,13 +410,13 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 	}
 
 	file := &mcmodel.File{
-		ProjectID:   globusRequest.ProjectID,
+		ProjectID:   transferRequest.ProjectID,
 		Name:        name,
 		DirectoryID: dir.ID,
 		Size:        0,
 		Checksum:    "",
 		MimeType:    getMimeType(name),
-		OwnerID:     globusRequest.OwnerID,
+		OwnerID:     transferRequest.OwnerID,
 		Current:     false,
 	}
 
@@ -454,7 +453,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 	var f mcmodel.File
 	err = DB.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
-		Where("project_id = ?", globusRequest.ProjectID).
+		Where("project_id = ?", transferRequest.ProjectID).
 		Where("name = ?", name).
 		Where("current = ?", true).
 		Find(&f).Error

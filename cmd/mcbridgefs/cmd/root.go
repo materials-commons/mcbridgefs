@@ -109,8 +109,8 @@ file versions and consistency for the project that the transfer request is assoc
 			server.c <- syscall.SIGINT
 		}
 
-		closedRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
-		closedRequestMonitor.Start()
+		transferRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
+		transferRequestMonitor.Start()
 
 		go server.listenForUnmount(cancel)
 

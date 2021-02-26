@@ -100,9 +100,7 @@ file versions and consistency for the project that the transfer request is assoc
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		mcbridgefs.InitFS(mcfsDir, db, transferRequest)
-
-		rootNode := mcbridgefs.RootNode()
+		rootNode := mcbridgefs.CreateFS(mcfsDir, db, transferRequest)
 		server := mustStartFuseFileServer(args[0], rootNode)
 
 		onClose := func() {

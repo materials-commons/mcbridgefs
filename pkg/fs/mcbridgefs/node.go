@@ -36,13 +36,6 @@ var (
 	fileStore          *FileStore
 )
 
-func InitFS(mcfsRoot string, db *gorm.DB, tr mcmodel.TransferRequest) {
-	MCFSRoot = mcfsRoot
-	DB = db
-	transferRequest = tr
-	fileStore = NewFileStore(db, mcfsRoot, &transferRequest)
-}
-
 func init() {
 	// Get current user so we can set the uid and gid to use
 	u, err := user.Current()
@@ -69,7 +62,15 @@ func init() {
 	openedFilesTracker = NewOpenFilesTracker()
 }
 
-func RootNode() *Node {
+func CreateFS(mcfsRoot string, db *gorm.DB, tr mcmodel.TransferRequest) *Node {
+	MCFSRoot = mcfsRoot
+	DB = db
+	transferRequest = tr
+	fileStore = NewFileStore(db, mcfsRoot, &transferRequest)
+	return rootNode()
+}
+
+func rootNode() *Node {
 	bridgeRoot, err := bridgefs.NewBridgeRoot(os.Getenv("MCFS_DIR"), nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create root node: %s", err)

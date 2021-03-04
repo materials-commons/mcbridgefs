@@ -475,14 +475,14 @@ func (n *Node) renameDir(fromPath, toPath, name, toName string, f mcmodel.File) 
 		// not being moved to another directory. Just rename directory and all descendant directory
 		// paths
 	}
-	return fs.OK
+	return syscall.EINVAL
 }
 
 func (n *Node) renameFile(fromPath, toPath, name, toName string, f mcmodel.File) syscall.Errno {
 	if fromPath == toPath {
 		// not being moved to another directory. Just rename file and all its previous versions
 	}
-	return fs.OK
+	return syscall.EINVAL
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {

@@ -189,7 +189,7 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 		// Convert the files into a hashtable by name. Since we don't have the underlying mcmodel.File
 		// we create one on the fly only filling in the entries that will be needed to return the
 		// data about the directory. In this case all that is needed are the Name and the Directory (only
-		// Path off the directory). So for directory we use the single entry dirToUse. See comment at
+		// Path of the directory). So for directory we use the single entry dirToUse. See comment at
 		// start of Readdir that explains this.
 		for _, requestFile := range uploadedFiles {
 			uploadedFilesByName[requestFile.Name] = mcmodel.File{Name: requestFile.Name}

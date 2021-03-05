@@ -138,7 +138,7 @@ func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, 
 
 // Getattr gets attributes about the file
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	//fmt.Println("Getattr:", n.Path(n.Root()), n.IsDir())
+	//fmt.Println("Getattr:", n.TransferPathContext(n.Root()), n.IsDir())
 
 	// Owner is always the process the bridge is running as
 	out.Uid = uid
@@ -192,7 +192,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	p := n.ToPath()
+	p := n.ToTransferPathContext()
 	return fileStore.FindDirByPath(p.ProjectID, path)
 }
 

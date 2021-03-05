@@ -25,9 +25,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	mcdb "github.com/materials-commons/gomcdb"
-	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
-	"github.com/materials-commons/mcbridgefs/pkg/monitor"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -36,15 +34,13 @@ import (
 )
 
 var (
-	cfgFile           string
-	transferRequestID int
-	mcfsDir           string
+	cfgFile string
+	mcfsDir string
 )
 
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
-	rootCmd.PersistentFlags().IntVarP(&transferRequestID, "transfer-request-id", "t", -1, "Transfer request this mount is associated with")
 
 	mcfsDir = os.Getenv("MCFS_DIR")
 	if mcfsDir == "" {
@@ -70,10 +66,6 @@ file versions and consistency for the project that the transfer request is assoc
 			log.Fatalf("No path specified for mount.")
 		}
 
-		if transferRequestID == -1 {
-			log.Fatalf("No transfer request specified.")
-		}
-
 		var (
 			err error
 			db  *gorm.DB
@@ -87,28 +79,18 @@ file versions and consistency for the project that the transfer request is assoc
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		}
 
-		var transferRequest mcmodel.TransferRequest
-
-		if result := db.Preload("Owner").Find(&transferRequest, transferRequestID); result.Error != nil {
-			log.Fatalf("Unable to load TransferRequest id %d: %s", transferRequestID, result.Error)
-		}
-
-		if transferRequest.State != "open" {
-			log.Infof("TransferRequest %d state is not 'open' (state = %s), aborting", transferRequest.ID, transferRequest.State)
-			os.Exit(0)
-		}
-
 		ctx, cancel := context.WithCancel(context.Background())
+		_ = ctx
 
-		rootNode := mcbridgefs.CreateFS(mcfsDir, db, transferRequest)
+		rootNode := mcbridgefs.CreateFS(mcfsDir, db)
 		server := mustStartFuseFileServer(args[0], rootNode)
 
-		onClose := func() {
-			server.c <- syscall.SIGINT
-		}
+		//onClose := func() {
+		//	server.c <- syscall.SIGINT
+		//}
 
-		transferRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
-		transferRequestMonitor.Start()
+		//transferRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
+		//transferRequestMonitor.Start()
 
 		go server.listenForUnmount(cancel)
 

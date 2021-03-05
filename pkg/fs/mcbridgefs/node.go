@@ -62,11 +62,11 @@ func init() {
 	openedFilesTracker = NewOpenFilesTracker()
 }
 
-func CreateFS(fsRoot string, dB *gorm.DB, tr mcmodel.TransferRequest) *Node {
+func CreateFS(fsRoot string, dB *gorm.DB) *Node {
 	mcfsRoot = fsRoot
 	db = dB
-	transferRequest = tr
-	fileStore = NewFileStore(dB, fsRoot, &transferRequest)
+	//transferRequest = tr
+	//fileStore = NewFileStore(dB, fsRoot, &transferRequest)
 	return rootNode()
 }
 
@@ -192,7 +192,8 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	return fileStore.FindDirByPath(transferRequest.ProjectID, path)
+	p := n.ToPath()
+	return fileStore.FindDirByPath(p.ProjectID, path)
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return

@@ -7,31 +7,27 @@ import (
 	"strings"
 )
 
-func t() {
-	path := "/gtarcea@umich.edu/1/rest/of/path"
-	fmt.Printf("%q\n", strings.SplitN(path, "/", 4))
-	fmt.Printf("%s: %+v\n", "/gtarcea@umich.edu/1", ToTransferPathContext("/gtarcea@umich.edu/1"))
-	fmt.Printf("%s: %+v\n", "/gtarcea@umich.edu/1/abc", ToTransferPathContext("/gtarcea@umich.edu/1/abc"))
-	fmt.Printf("%s: %+v\n", "/gtarcea@umich.edu/1/abc/def/ghi.txt", ToTransferPathContext("/gtarcea@umich.edu/1/abc/def/ghi.txt"))
-	fmt.Printf("%s: %+v\n", "/gtarcea@umich.edu", ToTransferPathContext("/gtarcea@umich.edu"))
-}
-
 type TransferPathContext struct {
-	Email     string
-	ProjectID int
-	Path      string
+	TransferType string
+	UserID       int
+	ProjectID    int
+	Path         string
 }
 
 func (p *TransferPathContext) ProjectPathContext() string {
-	return filepath.Join("/", p.Email, fmt.Sprintf("%d", p.ProjectID), "/")
+	return filepath.Join("/", p.TransferType, fmt.Sprintf("%d/%d", p.UserID, p.ProjectID))
+}
+
+func (p *TransferPathContext) IsTransferType() bool {
+	return p.TransferType != ""
 }
 
 func (p *TransferPathContext) IsRoot() bool {
-	return p.Email == ""
+	return p.TransferType == ""
 }
 
-func (p *TransferPathContext) IsEmail() bool {
-	return p.Email != ""
+func (p *TransferPathContext) IsUserID() bool {
+	return p.UserID != 0
 }
 
 func (p *TransferPathContext) IsProject() bool {
@@ -48,25 +44,34 @@ func (p *TransferPathContext) ToFilePath(name string) string {
 }
 
 func (p *TransferPathContext) ToFSPath(name string) string {
-	return filepath.Join("/", p.Email, fmt.Sprintf("%d", p.ProjectID), p.Path, name)
+	return filepath.Join("/", p.TransferType, fmt.Sprintf("%d/%d", p.UserID, p.ProjectID), p.Path, name)
 }
 
 func ToTransferPathContext(p string) *TransferPathContext {
-	pathParts := strings.SplitN(p, "/", 4)
+	pathParts := strings.SplitN(p, "/", 5)
 
-	id := 0
+	userID := 0
 	if len(pathParts) > 2 {
-		id, _ = strconv.Atoi(pathParts[2])
+		userID, _ = strconv.Atoi(pathParts[2])
 	}
 
-	rest := "/"
-	if len(pathParts) == 4 {
-		rest = filepath.Join("/", pathParts[3])
+	projectID := 0
+	if len(pathParts) > 3 {
+		projectID, _ = strconv.Atoi(pathParts[3])
+	}
+
+	rest := ""
+	if userID != 0 && projectID != 0 {
+		rest = "/"
+	}
+	if len(pathParts) == 5 {
+		rest = filepath.Join("/", pathParts[4])
 	}
 
 	return &TransferPathContext{
-		Email:     pathParts[1],
-		ProjectID: id,
-		Path:      rest,
+		TransferType: pathParts[1],
+		UserID:       userID,
+		ProjectID:    projectID,
+		Path:         rest,
 	}
 }

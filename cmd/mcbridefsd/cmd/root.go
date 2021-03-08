@@ -24,6 +24,7 @@ import (
 	"github.com/apex/log"
 	"github.com/labstack/echo/v4/middleware"
 	mcdb "github.com/materials-commons/gomcdb"
+	"github.com/materials-commons/gomcdb/mcmodel"
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -83,14 +84,23 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func stopBridgeController(context echo.Context) error {
+func stopBridgeController(c echo.Context) error {
 	var req struct {
 		TransferRequestID int `json:"transfer_request_id"`
 	}
 
-	_ = req
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
 
-	return nil
+	transferRequest := mcmodel.TransferRequest{ID: req.TransferRequestID}
+
+	err := db.Model(&transferRequest).Update("state", "closed").Error
+	if err != nil {
+		return err
+	}
+
+	return c.NoContent(http.StatusOK)
 }
 
 func listActiveBridgesController(c echo.Context) error {

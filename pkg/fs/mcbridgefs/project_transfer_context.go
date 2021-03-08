@@ -74,7 +74,7 @@ func setupTransferContext(pathContext TransferPathContext) error {
 		return err
 	}
 
-	if pathContext.TransferType == "globus" {
+	if pathContext.IsGlobusTransferType() {
 		if err := setupGlobus(pathContext, projectContext, user); err != nil {
 			return err
 		}
@@ -141,9 +141,11 @@ func cleanupTransferContext(pathContext TransferPathContext) {
 	transferContext.mutex.Lock()
 	defer transferContext.mutex.Unlock()
 
-	endpointID := os.Getenv("MC_GLOBUS_ENDPOINT_ID")
-	if _, err := globusClient.DeleteEndpointACLRule(endpointID, transferContext.globusContext.globusACL); err != nil {
-		log.Errorf("Failed deleting ACL for %s: %s", pathContext.ProjectPathContext(), err)
+	if pathContext.IsGlobusTransferType() {
+		endpointID := os.Getenv("MC_GLOBUS_ENDPOINT_ID")
+		if _, err := globusClient.DeleteEndpointACLRule(endpointID, transferContext.globusContext.globusACL); err != nil {
+			log.Errorf("Failed deleting ACL for %s: %s", pathContext.ProjectPathContext(), err)
+		}
 	}
 
 	if err := db.Delete(&transferContext.transferRequest).Error; err != nil {

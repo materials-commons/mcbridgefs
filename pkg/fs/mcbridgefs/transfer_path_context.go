@@ -22,6 +22,10 @@ func (p *TransferPathContext) IsTransferType() bool {
 	return p.TransferType != ""
 }
 
+func (p *TransferPathContext) IsGlobusTransferType() bool {
+	return p.TransferType == "globus"
+}
+
 func (p *TransferPathContext) IsRoot() bool {
 	return p.TransferType == ""
 }

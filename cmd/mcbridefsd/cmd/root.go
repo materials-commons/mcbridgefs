@@ -19,17 +19,32 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/apex/log"
 	"github.com/labstack/echo/v4/middleware"
+	mcdb "github.com/materials-commons/gomcdb"
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/labstack/echo/v4"
 )
 
-var cfgFile string
+var (
+	cfgFile       string
+	activeBridges sync.Map
+	db            *gorm.DB
+)
+
+type ActiveBridge struct {
+	TransferRequestID int    `json:"transfer_request_id"`
+	MountPath         string `json:"mount_path"`
+	Pid               int    `json:"pid"`
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -49,8 +64,18 @@ to quickly create a Cobra application.`,
 		e.HidePort = true
 		e.Use(middleware.Recover())
 
+		var err error
+		gormConfig := &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Silent),
+		}
+		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
+			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
+		}
+
 		g := e.Group("/api")
-		g.POST("/start", startBridgeController)
+		g.POST("/start-bridge", startBridgeController)
+		g.GET("/list-active-bridges", listActiveBridgesController)
+		g.POST("/stop-bridge", stopBridgeController)
 
 		if err := e.Start("localhost:1323"); err != nil {
 			log.Fatalf("Unable to start web server: %s", err)
@@ -58,26 +83,70 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func startBridgeController(c echo.Context) error {
+func stopBridgeController(context echo.Context) error {
 	var req struct {
-		TransferRequestID int    `json:"transfer_request_id"`
-		MountPath         string `json:"mount_path"`
-		LogPath           string `json:"log_path"`
+		TransferRequestID int `json:"transfer_request_id"`
 	}
+
+	_ = req
+
+	return nil
+}
+
+func listActiveBridgesController(c echo.Context) error {
+	var resp []ActiveBridge
+
+	activeBridges.Range(func(key, value interface{}) bool {
+		runningMount := value.(ActiveBridge)
+		resp = append(resp, runningMount)
+		return true
+	})
+
+	return c.JSON(http.StatusOK, &resp)
+}
+
+type StartBridgeRequest struct {
+	TransferRequestID int    `json:"transfer_request_id"`
+	MountPath         string `json:"mount_path"`
+	LogPath           string `json:"log_path"`
+}
+
+func startBridgeController(c echo.Context) error {
+	var req StartBridgeRequest
 
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("nohup", "/usr/local/bin/mcbridgefs.sh", fmt.Sprintf("%d", req.TransferRequestID),
-		req.MountPath, req.LogPath)
-
 	// Run in background
-	go func(cmd *exec.Cmd) {
-		cmd.Run()
-	}(cmd)
+	go startBridge(req)
 
 	return c.NoContent(http.StatusOK)
+}
+
+func startBridge(req StartBridgeRequest) {
+
+	cmd := exec.Command("nohup", "/usr/local/bin/mcbridgefs.sh", fmt.Sprintf("%d", req.TransferRequestID),
+		req.MountPath, req.LogPath)
+	if err := cmd.Start(); err != nil {
+		log.Errorf("Starting bridge failed (%d, %s): %s", req.TransferRequestID, req.MountPath, err)
+		return
+	}
+
+	activeBridge := ActiveBridge{
+		TransferRequestID: req.TransferRequestID,
+		MountPath:         req.MountPath,
+		Pid:               cmd.Process.Pid,
+	}
+
+	// Store running bridge so it can be queried and tracked
+	activeBridges.Store(req.MountPath, activeBridge)
+
+	if err := cmd.Wait(); err != nil {
+		log.Errorf("Bridge exited with error: %s", err)
+	}
+
+	activeBridges.Delete(req.MountPath)
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

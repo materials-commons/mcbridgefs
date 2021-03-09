@@ -76,7 +76,7 @@ to quickly create a Cobra application.`,
 		g.POST("/start-bridge", startBridgeController)
 		g.GET("/list-active-bridges", listActiveBridgesController)
 		g.POST("/stop-bridge", stopBridgeController)
-		g.GET("/stop-server", stopBridgedServerController)
+		g.GET("/stop-server", stopServerController)
 
 		if err := e.Start("localhost:1323"); err != nil {
 			log.Fatalf("Unable to start web server: %s", err)
@@ -84,7 +84,7 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func stopBridgedServerController(c echo.Context) error {
+func stopServerController(c echo.Context) error {
 	os.Exit(0)
 	return nil
 }

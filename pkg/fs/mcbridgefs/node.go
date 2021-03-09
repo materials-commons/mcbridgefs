@@ -475,19 +475,19 @@ func (n *Node) renameDir(fromPath, toPath, name, toName string, f mcmodel.File) 
 		// not being moved to another directory. Just rename directory and all descendant directory
 		// paths
 	}
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 func (n *Node) renameFile(fromPath, toPath, name, toName string, f mcmodel.File) syscall.Errno {
 	if fromPath == toPath {
 		// not being moved to another directory. Just rename file and all its previous versions
 	}
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
 	fmt.Printf("Unlink: %s/%s\n", n.Path(n.Root()), name)
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 // getMode returns the mode for the file. It checks if the underlying mcmodel.File is

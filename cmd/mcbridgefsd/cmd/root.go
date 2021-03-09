@@ -84,7 +84,7 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func stopServerController(c echo.Context) error {
+func stopServerController(_ echo.Context) error {
 	os.Exit(0)
 	return nil
 }

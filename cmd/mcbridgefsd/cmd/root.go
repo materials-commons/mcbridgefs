@@ -25,9 +25,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/gomcdb/mcmodel"
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -77,11 +76,17 @@ to quickly create a Cobra application.`,
 		g.POST("/start-bridge", startBridgeController)
 		g.GET("/list-active-bridges", listActiveBridgesController)
 		g.POST("/stop-bridge", stopBridgeController)
+		g.GET("/stop-server", stopBridgedServerController)
 
 		if err := e.Start("localhost:1323"); err != nil {
 			log.Fatalf("Unable to start web server: %s", err)
 		}
 	},
+}
+
+func stopBridgedServerController(c echo.Context) error {
+	os.Exit(0)
+	return nil
 }
 
 func stopBridgeController(c echo.Context) error {
@@ -183,26 +188,12 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		// Search config in home directory with name ".mcbridefsd" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".mcbridefsd")
+	dotenvFilePath := os.Getenv("MC_DOTENV_PATH")
+	if dotenvFilePath == "" {
+		log.Fatalf("MC_DOTENV_PATH not set")
 	}
 
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	if err := gotenv.Load(dotenvFilePath); err != nil {
+		log.Fatalf("Loading %s failed: %s", dotenvFilePath, err)
 	}
 }

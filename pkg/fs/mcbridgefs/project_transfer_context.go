@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/go-uuid"
 	globus "github.com/materials-commons/goglobus"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"gorm.io/gorm"
 )
 
 type GlobusContext struct {
@@ -28,6 +29,42 @@ type ProjectTransferContext struct {
 
 var projectTransfers sync.Map
 var globusClient *globus.Client
+var projectTransfersLoaded = false
+
+func LoadProjectTransfers(db *gorm.DB) error {
+	if projectTransfersLoaded {
+		return nil
+	}
+
+	var activeTransfers []mcmodel.TransferRequest
+	result := db.Preload("GlobusTransfer").Find(&activeTransfers)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		projectTransfersLoaded = true
+		return nil
+	}
+
+	for _, transfer := range activeTransfers {
+		projectTransferContext := &ProjectTransferContext{
+			setupComplete:   true,
+			transferRequest: transfer,
+			// TODO: Construct the TransferPathContext
+		}
+
+		if transfer.GlobusTransfer != nil {
+			projectTransferContext.globusContext = GlobusContext{
+				globusACL:        transfer.GlobusTransfer.GlobusAclID,
+				globusIdentityID: transfer.GlobusTransfer.GlobusIdentityID,
+			}
+		}
+	}
+
+	projectTransfersLoaded = true
+	return nil
+}
 
 func setupTransferContext(pathContext TransferPathContext) error {
 	projectTransferContext := &ProjectTransferContext{}

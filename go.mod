@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.1
 	github.com/labstack/echo/v4 v4.2.1
 	github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0
-	github.com/materials-commons/gomcdb v0.0.0-20210226182644-72e4df3d718e
+	github.com/materials-commons/gomcdb v0.0.0-20210310195810-e118ac37967f
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.1

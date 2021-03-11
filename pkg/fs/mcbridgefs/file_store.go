@@ -247,3 +247,14 @@ func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
 
 	return &file, err
 }
+
+func (s *FileStore) UpdateFileUses(file *mcmodel.File, uuid string, fileID int) error {
+	err := withTxRetry(func(tx *gorm.DB) error {
+		return tx.Model(file).Updates(mcmodel.File{
+			UsesUUID: uuid,
+			UsesID:   fileID,
+		}).Error
+	}, s.db, txRetryCount)
+
+	return err
+}

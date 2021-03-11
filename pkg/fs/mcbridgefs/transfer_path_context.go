@@ -52,6 +52,11 @@ func (p *TransferPathContext) ToFSPath(name string) string {
 }
 
 func ToTransferPathContext(p string) *TransferPathContext {
+	// Format of path:
+	//  /<transfer-type>/<user-id>/<project-id>/rest-of-path
+	//  Examples:
+	//    /globus/1/1  # transfer-type=globus, user-id=1, project-id=1
+	//    /globus/1/2/dir1/dir2 # transfer-type=globus, user-id=2, project-id=2, rest=/dir1/dir2
 	pathParts := strings.SplitN(p, "/", 5)
 
 	userID := 0

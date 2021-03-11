@@ -18,13 +18,13 @@ type GlobusContext struct {
 	globusIdentityID string
 }
 
-type ProjectTransferContext struct {
-	setupComplete   bool
-	transferType    string
-	transferContext TransferPathContext
-	transferRequest mcmodel.TransferRequest
-	globusContext   GlobusContext
-	mutex           sync.Mutex
+type ProjectTransfer struct {
+	setupComplete       bool
+	transferType        string
+	transferPathContext TransferPathContext
+	transferRequest     mcmodel.TransferRequest
+	globusContext       GlobusContext
+	mutex               sync.Mutex
 }
 
 var projectTransfers sync.Map
@@ -48,30 +48,33 @@ func LoadProjectTransfers(db *gorm.DB) error {
 	}
 
 	for _, transfer := range activeTransfers {
-		projectTransferContext := &ProjectTransferContext{
+		projectTransferContext := &ProjectTransfer{
 			setupComplete:   true,
 			transferRequest: transfer,
-			// TODO: Construct the TransferPathContext
 		}
 
 		if transfer.GlobusTransfer != nil {
+			transferPathContext := ToTransferPathContext(fmt.Sprintf("/globus/%d/%d/", transfer.OwnerID, transfer.ProjectID))
 			projectTransferContext.globusContext = GlobusContext{
 				globusACL:        transfer.GlobusTransfer.GlobusAclID,
 				globusIdentityID: transfer.GlobusTransfer.GlobusIdentityID,
 			}
+			projectTransferContext.transferPathContext = *transferPathContext
 		}
+
+		projectTransfers.Store(projectTransferContext.transferPathContext.ProjectPathContext(), projectTransferContext)
 	}
 
 	projectTransfersLoaded = true
 	return nil
 }
 
-func setupTransferContext(pathContext TransferPathContext) error {
-	projectTransferContext := &ProjectTransferContext{}
+func createProjectTransferIfNotExists(pathContext TransferPathContext) error {
+	projectTransferContext := &ProjectTransfer{}
 	val, ok := projectTransfers.LoadOrStore(pathContext.ProjectPathContext(), projectTransferContext)
 	if ok {
 		// There was already a ProjectTransferRequest loaded
-		projectContext := val.(*ProjectTransferContext)
+		projectContext := val.(*ProjectTransfer)
 		if projectContext.setupComplete {
 			// if setupComplete then there is nothing else to do
 			return nil
@@ -83,7 +86,7 @@ func setupTransferContext(pathContext TransferPathContext) error {
 	// in and initialized it.
 
 	// Create context and setACL
-	projectContext := val.(*ProjectTransferContext)
+	projectContext := val.(*ProjectTransfer)
 	projectContext.mutex.Lock()
 	defer projectContext.mutex.Unlock()
 
@@ -92,30 +95,30 @@ func setupTransferContext(pathContext TransferPathContext) error {
 		return nil
 	}
 
-	// if this is a globus transfer we need to validate that the user has a globus user account setup
-	var user mcmodel.User
-	if err := db.First(&user, pathContext.UserID).Error; err != nil {
-		return err
-	}
-
-	if user.GlobusUser == "" {
-		// This user hasn't configured a globus account so we can't setup this transfer request
-		return errors.New("no globus account configured")
-	}
-
-	// If we are here then we are creating the transfer. We will also look at the
-	// transfer type in the
-
-	var err error
-	if projectContext.transferRequest, err = createTransferRequest(pathContext.ProjectID, pathContext.UserID); err != nil {
-		return err
-	}
-
 	if pathContext.IsGlobusTransferType() {
+		// if this is a globus transfer we need to validate that the user has a globus user account setup
+		var user mcmodel.User
+		if err := db.First(&user, pathContext.UserID).Error; err != nil {
+			return err
+		}
+
+		if user.GlobusUser == "" {
+			// This user hasn't configured a globus account so we can't setup this transfer request
+			return errors.New("no globus account configured")
+		}
+
+		var err error
+		if projectContext.transferRequest, err = createTransferRequest(pathContext.ProjectID, pathContext.UserID); err != nil {
+			return err
+		}
+
 		if err := setupGlobus(pathContext, projectContext, user); err != nil {
+			// TODO: Should we delete the transfer request here?
 			return err
 		}
 	}
+	// Add additional transfer types here
+	// May need to refactor for common case calling createTransferRequest
 
 	projectContext.setupComplete = true
 
@@ -143,7 +146,7 @@ func createTransferRequest(projectID, userID int) (mcmodel.TransferRequest, erro
 	return transferRequest, result.Error
 }
 
-func setupGlobus(pathContext TransferPathContext, projectContext *ProjectTransferContext, user mcmodel.User) error {
+func setupGlobus(pathContext TransferPathContext, projectContext *ProjectTransfer, user mcmodel.User) error {
 	identities, err := globusClient.GetIdentities([]string{user.GlobusUser})
 	if err != nil {
 		return nil
@@ -174,7 +177,7 @@ func cleanupTransferContext(pathContext TransferPathContext) {
 		return
 	}
 
-	transferContext := val.(*ProjectTransferContext)
+	transferContext := val.(*ProjectTransfer)
 	transferContext.mutex.Lock()
 	defer transferContext.mutex.Unlock()
 

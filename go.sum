@@ -55,6 +55,8 @@ github.com/go-logfmt/logfmt v0.3.0/go.mod h1:Qt1PoO58o5twSAckw1HlFXLmHsOX5/0LbT9
 github.com/go-logfmt/logfmt v0.4.0/go.mod h1:3RMwSq7FuexP4Kalkev3ejPJsZTpXXBr9+V4qmtdjCk=
 github.com/go-resty/resty/v2 v2.4.0 h1:s6TItTLejEI+2mn98oijC5w/Rk2YU+OA6x0mnZN6r6k=
 github.com/go-resty/resty/v2 v2.4.0/go.mod h1:B88+xCTEwvfD94NOuE6GS1wMlnoKNY8eEiNizfNwOwA=
+github.com/go-resty/resty/v2 v2.5.0 h1:WFb5bD49/85PO7WgAjZ+/TJQ+Ty1XOcWEfD1zIFCM1c=
+github.com/go-resty/resty/v2 v2.5.0/go.mod h1:B88+xCTEwvfD94NOuE6GS1wMlnoKNY8eEiNizfNwOwA=
 github.com/go-sql-driver/mysql v1.5.0 h1:ozyZYNQW3x3HtqT1jira07DN2PArx2v7/mN66gGcHOs=
 github.com/go-sql-driver/mysql v1.5.0/go.mod h1:DCzpHaOWr8IXmIStZouvnhqoel9Qv2LBy8hT2VhHyBg=
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
@@ -150,6 +152,8 @@ github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0 h1:E8mA
 github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0/go.mod h1:9Vxy/5aFD1rhUO5JlqZjfUik8MlZZExFSECirJGmK5w=
 github.com/materials-commons/gomcdb v0.0.0-20210226182644-72e4df3d718e h1:T1FQrmJYRREJTK1eJ7Vzc4LkdCq3l0hW+Hxe83FA7p0=
 github.com/materials-commons/gomcdb v0.0.0-20210226182644-72e4df3d718e/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
+github.com/materials-commons/gomcdb v0.0.0-20210311183526-80ecf4355e7f h1:cR51w9SHCf2yXrovRiKqp2LEtCkXolLuzliBjUTo4fo=
+github.com/materials-commons/gomcdb v0.0.0-20210311183526-80ecf4355e7f/go.mod h1:GFGzSX+PIAYCls2cUi1/nbHsgZyN1kOH960TwSAXM2c=
 github.com/materials-commons/mc v0.0.0-20190920151351-e37fe638d79b h1:6QjhQLju1R1ISNWPvyT/Lq6OzniVfo2ZA0X5uEXldhE=
 github.com/materials-commons/mc v0.0.0-20190920151351-e37fe638d79b/go.mod h1:iH4mslNI2jEr5+iSf/TuLqysPUTptczvzYyzJpd7+S4=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=

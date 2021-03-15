@@ -13,6 +13,11 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	ErrNoProjectTransferRequest = errors.New("no project transfer request")
+	ErrNoAccessToProject        = errors.New("no access to project")
+)
+
 type GlobusContext struct {
 	globusACL        string
 	globusIdentityID string
@@ -69,7 +74,18 @@ func LoadProjectTransfers(db *gorm.DB) error {
 	return nil
 }
 
-func createProjectTransferIfNotExists(pathContext TransferPathContext) error {
+func GetProjectTransferRequest(pathContext TransferPathContext) (error, mcmodel.TransferRequest) {
+	projectTransferRequest := &ProjectTransfer{}
+	val, ok := projectTransfers.Load(pathContext.ProjectPathContext())
+	if !ok {
+		return ErrNoProjectTransferRequest, projectTransferRequest.transferRequest
+	}
+
+	projectTransferRequest = val.(*ProjectTransfer)
+	return nil, projectTransferRequest.transferRequest
+}
+
+func GetOrCreateProjectTransferRequest(pathContext TransferPathContext) (err error, transferRequest mcmodel.TransferRequest) {
 	projectTransferContext := &ProjectTransfer{}
 	val, ok := projectTransfers.LoadOrStore(pathContext.ProjectPathContext(), projectTransferContext)
 	if ok {
@@ -77,7 +93,7 @@ func createProjectTransferIfNotExists(pathContext TransferPathContext) error {
 		projectContext := val.(*ProjectTransfer)
 		if projectContext.setupComplete {
 			// if setupComplete then there is nothing else to do
-			return nil
+			return nil, projectContext.transferRequest
 		}
 	}
 
@@ -92,29 +108,34 @@ func createProjectTransferIfNotExists(pathContext TransferPathContext) error {
 
 	if projectContext.setupComplete {
 		// Someone slipped in before us and initialized this context so there is nothing to do
-		return nil
+		return nil, projectContext.transferRequest
+	}
+
+	// Make sure they have access to the project
+	if !canAccessProject(pathContext) {
+		return ErrNoAccessToProject, projectContext.transferRequest
 	}
 
 	if pathContext.IsGlobusTransferType() {
 		// if this is a globus transfer we need to validate that the user has a globus user account setup
 		var user mcmodel.User
 		if err := db.First(&user, pathContext.UserID).Error; err != nil {
-			return err
+			return err, projectContext.transferRequest
 		}
 
 		if user.GlobusUser == "" {
 			// This user hasn't configured a globus account so we can't setup this transfer request
-			return errors.New("no globus account configured")
+			return errors.New("no globus account configured"), projectContext.transferRequest
 		}
 
 		var err error
 		if projectContext.transferRequest, err = createTransferRequest(pathContext.ProjectID, pathContext.UserID); err != nil {
-			return err
+			return err, projectContext.transferRequest
 		}
 
 		if err := setupGlobus(pathContext, projectContext, user); err != nil {
 			// TODO: Should we delete the transfer request here?
-			return err
+			return err, projectContext.transferRequest
 		}
 	}
 	// Add additional transfer types here
@@ -125,7 +146,42 @@ func createProjectTransferIfNotExists(pathContext TransferPathContext) error {
 	// We don't need to store the updated projectContext because projectContext is a pointer to the
 	// context stored in the projectTransfers.
 
-	return nil
+	return nil, projectContext.transferRequest
+}
+
+func canAccessProject(pathContext TransferPathContext) bool {
+	var teamID int
+	sqlQuery := "select team_id from projects where id = ?"
+	if err := db.Raw(sqlQuery, pathContext.ProjectID).Scan(&teamID).Error; err != nil {
+		return false
+	}
+
+	var count int64
+	err := db.Table("team2admin").
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", pathContext.UserID).
+		Count(&count).Error
+	if err != nil {
+		return false
+	}
+
+	if count > 0 {
+		return true
+	}
+
+	err = db.Table("team2member").
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", pathContext.UserID).
+		Count(&count).Error
+	if err != nil {
+		return false
+	}
+
+	if count > 0 {
+		return true
+	}
+
+	return false
 }
 
 func createTransferRequest(projectID, userID int) (mcmodel.TransferRequest, error) {

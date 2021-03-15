@@ -85,13 +85,6 @@ file versions and consistency for the project that the transfer request is assoc
 		rootNode := mcbridgefs.CreateFS(mcfsDir, db)
 		server := mustStartFuseFileServer(args[0], rootNode)
 
-		//onClose := func() {
-		//	server.c <- syscall.SIGINT
-		//}
-
-		//transferRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
-		//transferRequestMonitor.Start()
-
 		go server.listenForUnmount(cancel)
 
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])

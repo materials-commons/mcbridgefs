@@ -12,13 +12,12 @@ import (
 )
 
 type FileStore struct {
-	db              *gorm.DB
-	mcfsRoot        string
-	transferRequest *mcmodel.TransferRequest
+	db       *gorm.DB
+	mcfsRoot string
 }
 
-func NewFileStore(db *gorm.DB, mcfsRoot string, transferRequest *mcmodel.TransferRequest) *FileStore {
-	return &FileStore{db: db, mcfsRoot: mcfsRoot, transferRequest: transferRequest}
+func NewFileStore(db *gorm.DB, mcfsRoot string) *FileStore {
+	return &FileStore{db: db, mcfsRoot: mcfsRoot}
 }
 
 func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error {
@@ -63,9 +62,9 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 	}, s.db, txRetryCount)
 }
 
-func (s *FileStore) CreateNewFile(file, dir *mcmodel.File) (*mcmodel.File, error) {
+func (s *FileStore) CreateNewFile(file, dir *mcmodel.File, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	var err error
-	if file, err = s.addFileToDatabase(file, dir.ID); err != nil {
+	if file, err = s.addFileToDatabase(file, dir.ID, transferRequest); err != nil {
 		return file, err
 	}
 
@@ -84,17 +83,17 @@ func (s *FileStore) CreateNewFile(file, dir *mcmodel.File) (*mcmodel.File, error
 // for the file. The TransferRequestFile will be created based on the file entry.
 // to the database. The file parameter must be filled out, except for the UUID which will be generated
 // for the file. The TransferRequestFile will be created based on the file entry.
-func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.File, error) {
+func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	var (
-		err                 error
-		transferRequestUUID string
+		err                     error
+		transferFileRequestUUID string
 	)
 
 	if file.UUID, err = uuid.GenerateUUID(); err != nil {
 		return nil, err
 	}
 
-	if transferRequestUUID, err = uuid.GenerateUUID(); err != nil {
+	if transferFileRequestUUID, err = uuid.GenerateUUID(); err != nil {
 		return nil, err
 	}
 
@@ -107,14 +106,14 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int) (*mcmodel.F
 
 		// Create a new transfer request file entry to account for the new file
 		transferRequestFile := mcmodel.TransferRequestFile{
-			ProjectID:         s.transferRequest.ProjectID,
+			ProjectID:         transferRequest.ProjectID,
 			OwnerID:           file.OwnerID,
-			TransferRequestID: s.transferRequest.ID,
+			TransferRequestID: transferRequest.ID,
 			Name:              file.Name,
 			DirectoryID:       dirID,
 			FileID:            file.ID,
 			State:             "uploading",
-			UUID:              transferRequestUUID,
+			UUID:              transferFileRequestUUID,
 		}
 
 		return tx.Create(&transferRequestFile).Error
@@ -137,23 +136,23 @@ func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, er
 	return &dir, nil
 }
 
-func (s *FileStore) CreateDirectory(parentDirID int, path, name string) (*mcmodel.File, error) {
+func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	var dir mcmodel.File
 	err := withTxRetry(func(tx *gorm.DB) error {
-		err := tx.Where("path = ", path).Where("project_id = ?", s.transferRequest.ProjectID).Find(&dir).Error
+		err := tx.Where("path = ", path).Where("project_id = ?", transferRequest.ProjectID).Find(&dir).Error
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
 			// directory already exists no need to create
 			return nil
 		}
 
 		dir = mcmodel.File{
-			OwnerID:              s.transferRequest.OwnerID,
+			OwnerID:              transferRequest.OwnerID,
 			MimeType:             "directory",
 			MediaTypeDescription: "directory",
 			DirectoryID:          parentDirID,
 			Current:              true,
 			Path:                 path,
-			ProjectID:            s.transferRequest.ProjectID,
+			ProjectID:            transferRequest.ProjectID,
 			Name:                 name,
 		}
 
@@ -168,11 +167,11 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string) (*mcmode
 	return &dir, err
 }
 
-func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
+func (s *FileStore) ListDirectory(dir *mcmodel.File, transferRequest mcmodel.TransferRequest) ([]mcmodel.File, error) {
 	var files []mcmodel.File
 
 	err := s.db.Where("directory_id = ?", dir.ID).
-		Where("project_id", s.transferRequest.ProjectID).
+		Where("project_id", transferRequest.ProjectID).
 		Where("current = true").
 		Find(&files).Error
 	if err != nil {
@@ -182,7 +181,7 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	// Get files that have been uploaded
 	var uploadedFiles []mcmodel.TransferRequestFile
 	results := s.db.Where("directory_id = ?", dir.ID).
-		Where("transfer_request_id = ?", s.transferRequest.ID).
+		Where("transfer_request_id = ?", transferRequest.ID).
 		Find(&uploadedFiles)
 	uploadedFilesByName := make(map[string]mcmodel.File)
 	if results.Error == nil && len(uploadedFiles) != 0 {
@@ -212,12 +211,12 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 	return files, nil
 }
 
-func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
+func (s *FileStore) GetFileByPath(path string, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	// Get directory so we can use its id for lookups
 	dirPath := filepath.Dir(path)
 	fileName := filepath.Base(path)
 	var dir mcmodel.File
-	err := s.db.Where("project_id = ?", s.transferRequest.ProjectID).
+	err := s.db.Where("project_id = ?", transferRequest.ProjectID).
 		Where("path = ?", dirPath).
 		First(&dir).Error
 	if err != nil {
@@ -229,7 +228,7 @@ func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
 	var transferRequestFile mcmodel.TransferRequestFile
 	err = s.db.Preload("File.Directory").
 		Where("directory_id = ?", dir.ID).
-		Where("transfer_request_id = ?", s.transferRequest.ID).
+		Where("transfer_request_id = ?", transferRequest.ID).
 		Where("name = ?", fileName).
 		First(&transferRequestFile).Error
 	if err == nil && transferRequestFile.File != nil {

@@ -30,7 +30,6 @@ var (
 	uid, gid           uint32
 	mcfsRoot           string
 	db                 *gorm.DB
-	transferRequest    mcmodel.TransferRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 	fileStore          *FileStore
@@ -65,8 +64,7 @@ func init() {
 func CreateFS(fsRoot string, dB *gorm.DB) *Node {
 	mcfsRoot = fsRoot
 	db = dB
-	//transferRequest = tr
-	//fileStore = NewFileStore(dB, fsRoot, &transferRequest)
+	fileStore = NewFileStore(dB, fsRoot)
 	return rootNode()
 }
 
@@ -104,7 +102,12 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
-	files, err := fileStore.ListDirectory(dir)
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return nil, syscall.ENOENT
+	}
+
+	files, err := fileStore.ListDirectory(dir, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -126,6 +129,17 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 // Opendir just returns success
 func (n *Node) Opendir(ctx context.Context) syscall.Errno {
+	transferPathContext := n.ToTransferPathContext()
+
+	// We only allow access at the project level or above, so check that they are in a project
+	if !transferPathContext.IsProject() {
+		return syscall.EPERM
+	}
+
+	if err, _ := GetOrCreateProjectTransferRequest(*transferPathContext); err != nil {
+		return syscall.ENOENT
+	}
+
 	return fs.OK
 }
 
@@ -150,7 +164,13 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		return fs.OK
 	}
 
-	file, err := fileStore.GetFileByPath(filepath.Join("/", n.Path(n.Root())))
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return syscall.ENOENT
+	}
+
+	path := filepath.Join("/", n.Path(n.Root()))
+	file, err := fileStore.GetFileByPath(path, transferRequest)
 	if err != nil {
 		log.Errorf("Getattr: GetFileByPath failed (%s): %s\n", filepath.Join("/", n.Path(n.Root())), err)
 		return syscall.ENOENT
@@ -169,8 +189,13 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 
 // Lookup will return information about the current entry.
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return nil, syscall.ENOENT
+	}
+
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	f, err := fileStore.GetFileByPath(path)
+	f, err := fileStore.GetFileByPath(path, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -205,7 +230,12 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		return nil, syscall.EINVAL
 	}
 
-	dir, err := fileStore.CreateDirectory(parent.ID, path, name)
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return nil, syscall.EINVAL
+	}
+
+	dir, err := fileStore.CreateDirectory(parent.ID, path, name, transferRequest)
 
 	if err != nil {
 		return nil, syscall.EINVAL
@@ -230,7 +260,12 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 // Create will create a new file. At this point the file shouldn't exist. However, because multiple users could be
 // uploading files, there is a chance it does exist. If that happens then a new version of the file is created instead.
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	f, err := n.createNewMCFile(name)
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return nil, nil, 0, syscall.EINVAL
+	}
+
+	f, err := n.createNewMCFile(name, transferRequest)
 	if err != nil {
 		log.Errorf("Create - failed creating new file (%s): %s", name, err)
 		return nil, nil, 0, syscall.EIO
@@ -265,6 +300,11 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		err     error
 		newFile *mcmodel.File
 	)
+
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return nil, 0, syscall.EINVAL
+	}
 	path := filepath.Join("/", n.Path(n.Root()))
 
 	switch flags & syscall.O_ACCMODE {
@@ -273,7 +313,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	case syscall.O_WRONLY:
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
-			newFile, err = n.createNewMCFileVersion()
+			newFile, err = n.createNewMCFileVersion(transferRequest)
 			if err != nil {
 				// TODO: What error should be returned?
 				return nil, 0, syscall.EIO
@@ -286,7 +326,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 	case syscall.O_RDWR:
 		newFile = getFromOpenedFiles(path)
 		if newFile == nil {
-			newFile, err = n.createNewMCFileVersion()
+			newFile, err = n.createNewMCFileVersion(transferRequest)
 			if err != nil {
 				// TODO: What error should be returned?
 				return nil, 0, syscall.EIO
@@ -365,7 +405,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 // that version. Otherwise it will create a new version and add it to the OpenedFilesTracker. In
 // addition when a new version is created, the associated on disk directory is created and an empty
 // file is written to it.
-func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
+func (n *Node) createNewMCFileVersion(transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	// First check if there is already a version of this file being written to for this upload context.
 	existing := getFromOpenedFiles(filepath.Join("/", n.Path(n.Root()), n.file.Name))
 	if existing != nil {
@@ -386,7 +426,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory)
+	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory, transferRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +445,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 
 // createNewMCFile will create a new mcmodel.File entry for the directory associated
 // with the Node. It will create the directory where the file can be written to.
-func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
+func (n *Node) createNewMCFile(name string, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, err
@@ -422,7 +462,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	return fileStore.CreateNewFile(file, dir)
+	return fileStore.CreateNewFile(file, dir, transferRequest)
 }
 
 // getMimeType will determine the type of a file from its extension. It strips out the extra information
@@ -444,6 +484,10 @@ func getMimeType(name string) string {
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	fmt.Printf("Rename: %s/%s to %s/%s\n", n.Path(n.Root()), name, newParent.EmbeddedInode().Path(n.Root()), newName)
+	err, transferRequest := n.getTransferRequest()
+	if err != nil {
+		return syscall.ENOENT
+	}
 	fromPath := filepath.Join("/", n.Path(n.Root()))
 	toPath := filepath.Join("/", newParent.EmbeddedInode().Path(n.Root()))
 
@@ -514,6 +558,10 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(entry.FullPath()))
 	return h.Sum64()
+}
+
+func (n *Node) getTransferRequest() (error, mcmodel.TransferRequest) {
+	return GetProjectTransferRequest(*n.ToTransferPathContext())
 }
 
 // getFromOpenedFiles returns the mcmodel.File from the openedFilesTracker. It handles

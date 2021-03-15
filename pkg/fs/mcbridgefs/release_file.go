@@ -12,16 +12,10 @@ import (
 // TODO: Maybe this should be done when we are going to delete the transfer request. It will be done
 // for all the file that were transfered. That part of the code also has to handle incrementing the
 // count for the project when completely new files have been uploaded.
-func releaseFile(file *mcmodel.File, checksum string) error {
-	// Steps on release
-	//   Mark file as complete
-	if err := fileStore.MarkFileReleased(file, checksum); err != nil {
-		return err
-	}
-
-	if checksum != "" {
+func finishFile(file *mcmodel.File, transferRequest mcmodel.TransferRequest) error {
+	if file.Checksum != "" {
 		var foundFile mcmodel.File
-		result := db.Model(file).Where("checksum = ?", checksum).
+		result := db.Model(file).Where("checksum = ?", file.Checksum).
 			Where("id <> ?", file.ID).
 			Where("uses_uuid is null").
 			First(&foundFile)
@@ -38,12 +32,12 @@ func releaseFile(file *mcmodel.File, checksum string) error {
 	// transferRequest.Owner.ApiToken
 
 	var fileReq struct {
-		fileID    int `json:"file_id"`
-		projectID int `json:"project_id"`
+		FileID    int `json:"file_id"`
+		ProjectID int `json:"project_id"`
 	}
 
-	fileReq.fileID = file.ID
-	fileReq.projectID = file.ProjectID
+	fileReq.FileID = file.ID
+	fileReq.ProjectID = file.ProjectID
 
 	c := resty.New()
 	_, err := c.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}).R().

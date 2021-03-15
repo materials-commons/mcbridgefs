@@ -34,13 +34,11 @@ import (
 )
 
 var (
-	cfgFile string
 	mcfsDir string
 )
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcbridgefs.yaml)")
 
 	mcfsDir = os.Getenv("MCFS_DIR")
 	if mcfsDir == "" {
@@ -50,8 +48,6 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	// We don't use viper because all the needed configuration variables are in the environment that Laravel
-	// automatically sets up when a new process is launched.
 }
 
 // rootCmd represents the base command when called without any subcommands

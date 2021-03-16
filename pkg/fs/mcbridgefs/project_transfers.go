@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/apex/log"
 	"github.com/hashicorp/go-uuid"
@@ -58,15 +59,15 @@ func LoadProjectTransfers(db *gorm.DB) error {
 			transferRequest: transfer,
 		}
 
+		transferPathContext := ToTransferPathContext(fmt.Sprintf("/globus/%d/%d", transfer.OwnerID, transfer.ProjectID))
 		if transfer.GlobusTransfer != nil {
-			transferPathContext := ToTransferPathContext(fmt.Sprintf("/globus/%d/%d/", transfer.OwnerID, transfer.ProjectID))
 			projectTransferContext.globusContext = GlobusContext{
 				globusACL:        transfer.GlobusTransfer.GlobusAclID,
 				globusIdentityID: transfer.GlobusTransfer.GlobusIdentityID,
 			}
-			projectTransferContext.transferPathContext = *transferPathContext
-		}
 
+		}
+		projectTransferContext.transferPathContext = *transferPathContext
 		projectTransfers.Store(projectTransferContext.transferPathContext.ProjectPathContext(), projectTransferContext)
 	}
 
@@ -133,10 +134,10 @@ func GetOrCreateProjectTransferRequest(pathContext TransferPathContext) (err err
 			return err, projectContext.transferRequest
 		}
 
-		if err := setupGlobus(pathContext, projectContext, user); err != nil {
-			// TODO: Should we delete the transfer request here?
-			return err, projectContext.transferRequest
-		}
+		//if err := setupGlobus(pathContext, projectContext, user); err != nil {
+		//	// TODO: Should we delete the transfer request here?
+		//	return err, projectContext.transferRequest
+		//}
 	}
 	// Add additional transfer types here
 	// May need to refactor for common case calling createTransferRequest
@@ -188,9 +189,10 @@ func createTransferRequest(projectID, userID int) (mcmodel.TransferRequest, erro
 	var err error
 
 	transferRequest := mcmodel.TransferRequest{
-		State:     "open",
-		ProjectID: projectID,
-		OwnerID:   userID,
+		State:        "open",
+		ProjectID:    projectID,
+		OwnerID:      userID,
+		LastActiveAt: time.Now(),
 	}
 
 	if transferRequest.UUID, err = uuid.GenerateUUID(); err != nil {

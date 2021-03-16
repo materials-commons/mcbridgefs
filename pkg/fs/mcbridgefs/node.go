@@ -94,15 +94,63 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	// used the inodeHash() and getMode() methods. To work around this we
 	// create a single directory (see dirToUse below), and assign this as the
 	// directory for all mcmodel.File entries.
+
 	dirPath := filepath.Join("/", n.Path(n.Root()))
 	dirToUse := &mcmodel.File{Path: dirPath}
 
+	//fmt.Printf("Readdir dirPath = '%s'\n", dirPath)
+	filesList2 := make([]fuse.DirEntry, 0)
+
+	transferPathContext := n.ToTransferPathContext("")
+	_ = transferPathContext
+
+	switch {
+	//case transferPathContext.IsPath():
+	//	break
+	//case transferPathContext.IsProject():
+	//case transferPathContext.IsUserID():
+	//case transferPathContext.IsTransferType():
+	//case transferPathContext.IsRoot():
+
+	case dirPath == "/":
+		filesList2 = append(filesList2, fuse.DirEntry{
+			Mode: 0755 | uint32(syscall.S_IFDIR),
+			Ino:  2,
+			Name: "globus",
+		})
+		return fs.NewListDirStream(filesList2), fs.OK
+	case dirPath == "/globus":
+		filesList2 = append(filesList2, fuse.DirEntry{
+			Mode: 0755 | uint32(syscall.S_IFDIR),
+			Ino:  130,
+			Name: "130",
+		})
+		return fs.NewListDirStream(filesList2), fs.OK
+	case dirPath == "/globus/130":
+		filesList2 = append(filesList2, fuse.DirEntry{
+			Mode: 0755 | uint32(syscall.S_IFDIR),
+			Ino:  77,
+			Name: "77",
+		})
+		return fs.NewListDirStream(filesList2), fs.OK
+	case dirPath == "/globus/130/77":
+		filesList2 = append(filesList2, fuse.DirEntry{
+			Mode: 0755 | uint32(syscall.S_IFDIR),
+			Ino:  3,
+			Name: "D1",
+		})
+		return fs.NewListDirStream(filesList2), fs.OK
+	default:
+		// nothing to do
+	}
+
+	//fmt.Println("Readdir is past switch")
 	dir, err := n.getMCDir("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
 
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -129,18 +177,28 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 // Opendir just returns success
 func (n *Node) Opendir(ctx context.Context) syscall.Errno {
-	transferPathContext := n.ToTransferPathContext()
+	path := n.Path(n.Root())
+	//fmt.Printf("Opendir: %s\n", path)
 
-	// We only allow access at the project level or above, so check that they are in a project
-	if !transferPathContext.IsProject() {
+	transferPathContext := n.ToTransferPathContext("")
+	//fmt.Printf(" immediate transferPathContext %+v\n", transferPathContext)
+
+	// Only allow access at the root level of the file system, which will only display the different transfer types,
+	// or the project level, which can list the project contents.
+	switch {
+	case transferPathContext.IsRoot():
+		return fs.OK
+	case transferPathContext.IsProject():
+		if err, _ := GetOrCreateProjectTransferRequest(*transferPathContext); err != nil {
+			log.Errorf("Unable to find the Project Transfer Request for %s: %s", transferPathContext.Path, err)
+			return syscall.EINVAL
+		}
+		return fs.OK
+	default:
+		fmt.Println("    Opendir returning EPERM for", path)
+		fmt.Printf("     %+v\n", transferPathContext)
 		return syscall.EPERM
 	}
-
-	if err, _ := GetOrCreateProjectTransferRequest(*transferPathContext); err != nil {
-		return syscall.ENOENT
-	}
-
-	return fs.OK
 }
 
 // Getxattr returns extra attributes. This is used by lstat. There are no extra attributes to
@@ -152,7 +210,7 @@ func (n *Node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, 
 
 // Getattr gets attributes about the file
 func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	//fmt.Println("Getattr:", n.TransferPathContext(n.Root()), n.IsDir())
+	//fmt.Println("Getattr:", n.Path(n.Root()), n.IsDir())
 
 	// Owner is always the process the bridge is running as
 	out.Uid = uid
@@ -164,7 +222,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		return fs.OK
 	}
 
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return syscall.ENOENT
 	}
@@ -189,13 +247,45 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 
 // Lookup will return information about the current entry.
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	err, transferRequest := n.getTransferRequest()
+	path2 := filepath.Join("/", n.Path(n.Root()), name)
+	//fmt.Printf("Lookup: '%s'\n", path2)
+
+	transferPathContext := n.ToTransferPathContext(name)
+
+	out.Uid = uid
+	out.Gid = gid
+	now2 := time.Now()
+	out.SetTimes(&now2, &now2, &now2)
+	node2 := n.newNode()
+	switch {
+	case transferPathContext.IsPath():
+		//fmt.Println("  Lookup IsPath()", path2)
+		return n.lookupProjectPath(ctx, name, out, transferPathContext)
+		//return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+	case transferPathContext.IsProject():
+		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+	case transferPathContext.IsUserID():
+		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+	case transferPathContext.IsGlobusTransferType():
+		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+	default:
+		// should never happen
+		//fmt.Println("   Lookup default")
+		return nil, syscall.ENOENT
+	}
+}
+
+func (n *Node) lookupProjectPath(ctx context.Context, name string, out *fuse.EntryOut, transferPathContext *TransferPathContext) (*fs.Inode, syscall.Errno) {
+	err, transferRequest := n.getTransferRequest(name)
 	if err != nil {
+		fmt.Println("lookupProjectPath returning ENOENT because it couldn't find transferRequest")
 		return nil, syscall.ENOENT
 	}
 
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	f, err := fileStore.GetFileByPath(path, transferRequest)
+	_ = path
+	//fmt.Println("Lookup transferPathContext.Path = ", transferPathContext.Path)
+	f, err := fileStore.GetFileByPath(transferPathContext.Path, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -214,11 +304,26 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	return n.NewInode(ctx, node, fs.StableAttr{Mode: n.getMode(f), Ino: n.inodeHash(f)}), fs.OK
 }
 
+func (n *Node) makeTestStableAttr(path string) fs.StableAttr {
+	switch path {
+	case "/globus":
+		return fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: 2}
+	case "/globus/130":
+		return fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: 130}
+	case "/globus/130/77":
+		return fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: 77}
+	case "/globus/130/77/MC":
+		return fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: 3}
+	default:
+		return fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: 4}
+	}
+}
+
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
-	path := filepath.Join("/", n.Path(n.Root()), name)
-	p := n.ToTransferPathContext()
-	return fileStore.FindDirByPath(p.ProjectID, path)
+	//path := filepath.Join("/", n.Path(n.Root()), name)
+	p := n.ToTransferPathContext(name)
+	return fileStore.FindDirByPath(p.ProjectID, p.Path)
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
@@ -230,7 +335,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		return nil, syscall.EINVAL
 	}
 
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return nil, syscall.EINVAL
 	}
@@ -260,7 +365,7 @@ func (n *Node) Rmdir(ctx context.Context, name string) syscall.Errno {
 // Create will create a new file. At this point the file shouldn't exist. However, because multiple users could be
 // uploading files, there is a chance it does exist. If that happens then a new version of the file is created instead.
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return nil, nil, 0, syscall.EINVAL
 	}
@@ -301,7 +406,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 		newFile *mcmodel.File
 	)
 
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return nil, 0, syscall.EINVAL
 	}
@@ -484,7 +589,7 @@ func getMimeType(name string) string {
 
 func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	fmt.Printf("Rename: %s/%s to %s/%s\n", n.Path(n.Root()), name, newParent.EmbeddedInode().Path(n.Root()), newName)
-	err, transferRequest := n.getTransferRequest()
+	err, transferRequest := n.getTransferRequest("")
 	if err != nil {
 		return syscall.ENOENT
 	}
@@ -560,8 +665,8 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 	return h.Sum64()
 }
 
-func (n *Node) getTransferRequest() (error, mcmodel.TransferRequest) {
-	return GetProjectTransferRequest(*n.ToTransferPathContext())
+func (n *Node) getTransferRequest(name string) (error, mcmodel.TransferRequest) {
+	return GetProjectTransferRequest(*n.ToTransferPathContext(name))
 }
 
 // getFromOpenedFiles returns the mcmodel.File from the openedFilesTracker. It handles

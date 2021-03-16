@@ -78,6 +78,10 @@ file versions and consistency for the project that the transfer request is assoc
 		ctx, cancel := context.WithCancel(context.Background())
 		_ = ctx
 
+		if err := mcbridgefs.LoadProjectTransfers(db); err != nil {
+			log.Fatalf("Failed loading existing project transfers: %s", err)
+		}
+
 		rootNode := mcbridgefs.CreateFS(mcfsDir, db)
 		server := mustStartFuseFileServer(args[0], rootNode)
 

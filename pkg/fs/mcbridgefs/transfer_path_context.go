@@ -38,9 +38,13 @@ func (p *TransferPathContext) IsProject() bool {
 	return p.ProjectID != 0
 }
 
-func (n *Node) ToTransferPathContext() *TransferPathContext {
+func (p *TransferPathContext) IsPath() bool {
+	return p.Path != ""
+}
+
+func (n *Node) ToTransferPathContext(name string) *TransferPathContext {
 	basePath := n.Path(n.Root())
-	return ToTransferPathContext(filepath.Join("/", basePath))
+	return ToTransferPathContext(filepath.Join("/", basePath, name))
 }
 
 func (p *TransferPathContext) ToFilePath(name string) string {
@@ -57,6 +61,7 @@ func ToTransferPathContext(p string) *TransferPathContext {
 	//  Examples:
 	//    /globus/1/1  # transfer-type=globus, user-id=1, project-id=1
 	//    /globus/1/2/dir1/dir2 # transfer-type=globus, user-id=2, project-id=2, rest=/dir1/dir2
+
 	pathParts := strings.SplitN(p, "/", 5)
 
 	userID := 0
@@ -70,9 +75,9 @@ func ToTransferPathContext(p string) *TransferPathContext {
 	}
 
 	rest := ""
-	if userID != 0 && projectID != 0 {
-		rest = "/"
-	}
+	//if userID != 0 && projectID != 0 {
+	//	rest = "/"
+	//}
 	if len(pathParts) == 5 {
 		rest = filepath.Join("/", pathParts[4])
 	}

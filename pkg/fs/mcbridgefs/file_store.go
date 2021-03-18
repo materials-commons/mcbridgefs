@@ -257,9 +257,3 @@ func (s *FileStore) UpdateFileUses(file *mcmodel.File, uuid string, fileID int) 
 
 	return err
 }
-
-func (s *FileStore) GetUsersWithGlobusAccount() (error, []mcmodel.User) {
-	var users []mcmodel.User
-	result := s.db.Where("globus_user is not null").Find(&users)
-	return result.Error, users
-}

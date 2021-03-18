@@ -47,6 +47,14 @@ func (n *Node) ToTransferPathContext(name string) *TransferPathContext {
 	return ToTransferPathContext(filepath.Join("/", basePath, name))
 }
 
+func (p *TransferPathContext) ToPath() string {
+	if p.Path == "" {
+		return "/"
+	}
+
+	return p.Path
+}
+
 func (p *TransferPathContext) ToFilePath(name string) string {
 	return filepath.Join(p.Path, name)
 }

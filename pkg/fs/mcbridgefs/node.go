@@ -33,6 +33,8 @@ var (
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 	fileStore          *FileStore
+	projectStore       *ProjectStore
+	userStore          *UserStore
 )
 
 func init() {
@@ -65,6 +67,8 @@ func CreateFS(fsRoot string, dB *gorm.DB) *Node {
 	mcfsRoot = fsRoot
 	db = dB
 	fileStore = NewFileStore(dB, fsRoot)
+	projectStore = NewProjectStore(db)
+	userStore = NewUserStore(db)
 	return rootNode()
 }
 
@@ -120,26 +124,57 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		})
 		return fs.NewListDirStream(filesList2), fs.OK
 	case dirPath == "/globus":
-		filesList2 = append(filesList2, fuse.DirEntry{
-			Mode: 0755 | uint32(syscall.S_IFDIR),
-			Ino:  130,
-			Name: "130",
-		})
+		err, users := userStore.GetUsersWithGlobusAccount()
+		if err != nil {
+			log.Errorf("Failed getting users: %s", err)
+		}
+		for _, u := range users {
+			filesList2 = append(filesList2, fuse.DirEntry{
+				Mode: 0755 | uint32(syscall.S_IFDIR),
+				Ino:  getInodeFromUUID(u.UUID),
+				Name: fmt.Sprintf("%d", u.ID),
+			})
+		}
 		return fs.NewListDirStream(filesList2), fs.OK
-	case dirPath == "/globus/130":
-		filesList2 = append(filesList2, fuse.DirEntry{
-			Mode: 0755 | uint32(syscall.S_IFDIR),
-			Ino:  77,
-			Name: "77",
-		})
+		//	filesList2 = append(filesList2, fuse.DirEntry{
+		//	Mode: 0755 | uint32(syscall.S_IFDIR),
+		//	Ino:  130,
+		//	Name: "130",
+		//})
+	case transferPathContext.IsPath():
+		// if we are here then just break and do the code below
+		break
+	case transferPathContext.IsProject():
+		// if we are then just break and do the code below
+		break
+	case transferPathContext.IsUserID():
+		err, projects := projectStore.GetProjectsForUser(transferPathContext.UserID)
+		if err != nil {
+			log.Errorf("Failed getting projects for user (%d): %s", transferPathContext.UserID, err)
+		}
+		for _, project := range projects {
+			filesList2 = append(filesList2, fuse.DirEntry{
+				Mode: 0755 | uint32(syscall.S_IFDIR),
+				Ino:  getInodeFromUUID(project.UUID),
+				Name: fmt.Sprintf("%d", project.ID),
+			})
+		}
 		return fs.NewListDirStream(filesList2), fs.OK
-	case dirPath == "/globus/130/77":
-		filesList2 = append(filesList2, fuse.DirEntry{
-			Mode: 0755 | uint32(syscall.S_IFDIR),
-			Ino:  3,
-			Name: "D1",
-		})
-		return fs.NewListDirStream(filesList2), fs.OK
+	//case dirPath == "/globus/130":
+	//	filesList2 = append(filesList2, fuse.DirEntry{
+	//		Mode: 0755 | uint32(syscall.S_IFDIR),
+	//		Ino:  77,
+	//		Name: "77",
+	//	})
+	//	return fs.NewListDirStream(filesList2), fs.OK
+	//case dirPath == "/globus/130/77":
+	//
+	//	filesList2 = append(filesList2, fuse.DirEntry{
+	//		Mode: 0755 | uint32(syscall.S_IFDIR),
+	//		Ino:  3,
+	//		Name: "D1",
+	//	})
+	//	return fs.NewListDirStream(filesList2), fs.OK
 	default:
 		// nothing to do
 	}
@@ -323,7 +358,7 @@ func (n *Node) makeTestStableAttr(path string) fs.StableAttr {
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	//path := filepath.Join("/", n.Path(n.Root()), name)
 	p := n.ToTransferPathContext(name)
-	return fileStore.FindDirByPath(p.ProjectID, p.Path)
+	return fileStore.FindDirByPath(p.ProjectID, p.ToPath())
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
@@ -678,4 +713,10 @@ func getFromOpenedFiles(path string) *mcmodel.File {
 	}
 
 	return nil
+}
+
+func getInodeFromUUID(uuid string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(uuid))
+	return h.Sum64()
 }

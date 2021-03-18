@@ -212,7 +212,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 // Opendir just returns success
 func (n *Node) Opendir(ctx context.Context) syscall.Errno {
-	path := n.Path(n.Root())
+	//path := n.Path(n.Root())
 	//fmt.Printf("Opendir: %s\n", path)
 
 	transferPathContext := n.ToTransferPathContext("")
@@ -230,8 +230,8 @@ func (n *Node) Opendir(ctx context.Context) syscall.Errno {
 		}
 		return fs.OK
 	default:
-		fmt.Println("    Opendir returning EPERM for", path)
-		fmt.Printf("     %+v\n", transferPathContext)
+		//fmt.Println("    Opendir returning EPERM for", path)
+		//fmt.Printf("     %+v\n", transferPathContext)
 		return syscall.EPERM
 	}
 }

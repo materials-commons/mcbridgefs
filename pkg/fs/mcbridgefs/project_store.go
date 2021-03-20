@@ -21,3 +21,7 @@ func (s *ProjectStore) GetProjectsForUser(userID int) (error, []mcmodel.Project)
 		Find(&projects).Error
 	return err, projects
 }
+
+func (s *ProjectStore) IncrementProjectFileCount(projectID int) error {
+	return nil
+}

@@ -614,6 +614,13 @@ func getMimeType(name string) string {
 		return "unknown"
 	}
 
+	if mediaType, _, err := mime.ParseMediaType(mimeType); err == nil {
+		// If err is nil then we can returned the parsed mediaType
+		return mediaType
+	}
+
+	// If we are here then ParseMediaType returned an error, so brute force separating
+	// the string to get the media type
 	semicolon := strings.Index(mimeType, ";")
 	if semicolon == -1 {
 		return strings.TrimSpace(mimeType)

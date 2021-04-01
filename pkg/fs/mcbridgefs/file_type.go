@@ -1,5 +1,7 @@
 package mcbridgefs
 
+import "strings"
+
 var mime2FileType = map[string]string{
 	"application/msword": "office",
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   "office",
@@ -45,20 +47,31 @@ var mime2Description = map[string]string{
 }
 
 func Mime2FileType(mimeStr string) string {
-	return ""
+	fileType, ok := mime2FileType[mimeStr]
+	if ok {
+		return fileType
+	}
+
+	return "unknown"
 }
 
-/*
-	protected $convertibleImageTypes = [
-	'image/tiff'     => true,
-	'image/x-ms-bmp' => true,
-	'image/bmp'      => true,
-];
+func Mime2Description(mimeStr string) string {
+	description, ok := mime2Description[mimeStr]
+	if ok {
+		return description
+	}
 
+	if strings.Contains(mimeStr, "video") {
+		return "Video"
+	}
 
-	protected $textTypes = [
-	"text/plain"       => true,
-	"text/csv"         => true,
-	"application/json" => true,
-];
-*/
+	if strings.Contains(mimeStr, "zip") {
+		return "Zipfile"
+	}
+
+	if strings.Contains(mimeStr, "latex") {
+		return "Latex"
+	}
+
+	return "Unknown"
+}

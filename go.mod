@@ -9,7 +9,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.1
 	github.com/labstack/echo/v4 v4.2.1
 	github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0
-	github.com/materials-commons/gomcdb v0.0.0-20210318130916-8e50db3d7265
+	github.com/materials-commons/gomcdb v0.0.0-20210401141610-0397df77d1d5
 	github.com/spf13/cobra v1.1.1
 	github.com/stretchr/testify v1.6.1
 	github.com/subosito/gotenv v1.2.0

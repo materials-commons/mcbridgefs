@@ -18,3 +18,7 @@ func withTxRetry(fn func(tx *gorm.DB) error, db *gorm.DB, retryCount int) error 
 
 	return err
 }
+
+func withTxRetryDefault(fn func(tx *gorm.DB) error, db *gorm.DB) error {
+	return withTxRetry(fn, db, txRetryCount)
+}

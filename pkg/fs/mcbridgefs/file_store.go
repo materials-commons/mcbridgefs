@@ -27,7 +27,7 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 		return err
 	}
 
-	return withTxRetry(func(tx *gorm.DB) error {
+	return s.withTxRetry(func(tx *gorm.DB) error {
 		// To set file as the current (ie viewable) version we first need to set all its previous
 		// versions to have current set to false.
 		err := tx.Model(&mcmodel.File{}).
@@ -59,7 +59,7 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 		// If we are here then the file was opened for read/write but it was never written to. In this situation there
 		// is no checksum that has been computed, so don't update the field.
 		return tx.Model(file).Updates(mcmodel.File{Size: uint64(finfo.Size()), Current: true}).Error
-	}, s.db, txRetryCount)
+	})
 }
 
 func (s *FileStore) CreateNewFile(file, dir *mcmodel.File, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
@@ -99,7 +99,7 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferReq
 
 	// Wrap creation in a transaction so that both the file and the TransferRequestFile are either
 	// both created, or neither is created.
-	err = withTxRetry(func(tx *gorm.DB) error {
+	err = s.withTxRetry(func(tx *gorm.DB) error {
 		if result := tx.Create(file); result.Error != nil {
 			return result.Error
 		}
@@ -117,7 +117,7 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferReq
 		}
 
 		return tx.Create(&transferRequestFile).Error
-	}, s.db, txRetryCount)
+	})
 
 	return file, err
 }
@@ -138,7 +138,7 @@ func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, er
 
 func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	var dir mcmodel.File
-	err := withTxRetry(func(tx *gorm.DB) error {
+	err := s.withTxRetry(func(tx *gorm.DB) error {
 		err := tx.Where("path = ", path).Where("project_id = ?", transferRequest.ProjectID).Find(&dir).Error
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
 			// directory already exists no need to create
@@ -161,8 +161,7 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transfer
 		}
 
 		return tx.Create(&dir).Error
-
-	}, s.db, txRetryCount)
+	})
 
 	return &dir, err
 }
@@ -248,12 +247,14 @@ func (s *FileStore) GetFileByPath(path string, transferRequest mcmodel.TransferR
 }
 
 func (s *FileStore) UpdateFileUses(file *mcmodel.File, uuid string, fileID int) error {
-	err := withTxRetry(func(tx *gorm.DB) error {
+	return s.withTxRetry(func(tx *gorm.DB) error {
 		return tx.Model(file).Updates(mcmodel.File{
 			UsesUUID: uuid,
 			UsesID:   fileID,
 		}).Error
-	}, s.db, txRetryCount)
+	})
+}
 
-	return err
+func (s *FileStore) withTxRetry(fn func(tx *gorm.DB) error) error {
+	return withTxRetryDefault(fn, s.db)
 }

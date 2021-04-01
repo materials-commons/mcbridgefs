@@ -49,7 +49,7 @@ func (s *ProjectStore) IncrementProjectFileTypeCount(project mcmodel.Project, fi
 	})
 }
 
-func (s *ProjectStore) UpdateProjectSizeAndFileCount(project mcmodel.Project, size int64, count int) error {
+func (s *ProjectStore) UpdateProjectSizeAndFileCount(project mcmodel.Project, size int64, fileCount int) error {
 	return s.withTxRetry(func(tx *gorm.DB) error {
 		var p mcmodel.Project
 		// Get latest project
@@ -57,20 +57,27 @@ func (s *ProjectStore) UpdateProjectSizeAndFileCount(project mcmodel.Project, si
 			return result.Error
 		}
 
-		return tx.Model(project).Updates(map[string]interface{}{
-
-		})
-
-		})
+		return tx.Model(project).Updates(mcmodel.Project{
+			FileCount: p.FileCount + fileCount,
+			Size: p.Size + size,
+		}).Error
 	})
 }
 
-func (s *ProjectStore) UpdateProjectDirectoryCount(project mcmodel.Project) error {
-	return nil
+func (s *ProjectStore) UpdateProjectDirectoryCount(project mcmodel.Project, directoryCount int) error {
+	return s.withTxRetry(func(tx *gorm.DB) error {
+		var p mcmodel.Project
+		// Get latest project
+		if result := tx.Find(&p, project.ID); result.Error != nil {
+			return result.Error
+		}
+
+		return tx.Model(project).Updates(mcmodel.Project{
+			DirectoryCount: p.DirectoryCount + directoryCount,
+		}).Error
+	})
 }
 
 func (s *ProjectStore) withTxRetry(fn func(tx *gorm.DB) error) error {
 	return withTxRetryDefault(fn, s.db)
 }
-
-

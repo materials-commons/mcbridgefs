@@ -62,9 +62,25 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 	})
 }
 
+func (s *FileStore) CreateNewFileVersion(file, dir *mcmodel.File, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
+	var err error
+	if file, err = s.addFileToDatabase(file, dir.ID, transferRequest, false); err != nil {
+		return file, err
+	}
+
+	if err := os.MkdirAll(file.ToUnderlyingDirPath(s.mcfsRoot), 0755); err != nil {
+		// TODO: If this fails then we should remove the created file from the database
+		log.Errorf("os.MkdirAll failed (%s): %s\n", file.ToUnderlyingDirPath(s.mcfsRoot), err)
+		return nil, err
+	}
+
+	file.Directory = dir
+	return file, nil
+}
+
 func (s *FileStore) CreateNewFile(file, dir *mcmodel.File, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
 	var err error
-	if file, err = s.addFileToDatabase(file, dir.ID, transferRequest); err != nil {
+	if file, err = s.addFileToDatabase(file, dir.ID, transferRequest, true); err != nil {
 		return file, err
 	}
 
@@ -83,7 +99,7 @@ func (s *FileStore) CreateNewFile(file, dir *mcmodel.File, transferRequest mcmod
 // for the file. The TransferRequestFile will be created based on the file entry.
 // to the database. The file parameter must be filled out, except for the UUID which will be generated
 // for the file. The TransferRequestFile will be created based on the file entry.
-func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferRequest mcmodel.TransferRequest) (*mcmodel.File, error) {
+func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferRequest mcmodel.TransferRequest, updateProject bool) (*mcmodel.File, error) {
 	var (
 		err                     error
 		transferFileRequestUUID string
@@ -116,10 +132,45 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferReq
 			UUID:              transferFileRequestUUID,
 		}
 
-		return tx.Create(&transferRequestFile).Error
+		if err := tx.Create(&transferRequestFile).Error; err != nil {
+			return err
+		}
+
+		if updateProject {
+			return incrementProjectFileTypeCountAndFilesCount(db, transferRequest.ProjectID, Mime2Description(file.MimeType))
+		}
+
+		return nil
 	})
 
 	return file, err
+}
+
+func incrementProjectFileTypeCountAndFilesCount(db *gorm.DB, projectID int, fileTypeDescription string) error {
+	var p mcmodel.Project
+	// Get latest for project
+	if result := db.Find(&p, projectID); result.Error != nil {
+		return result.Error
+	}
+
+	fileTypes, err := p.GetFileTypes()
+	if err != nil {
+		return err
+	}
+
+	count, ok := fileTypes[fileTypeDescription]
+	if !ok {
+		fileTypes[fileTypeDescription] = 1
+	} else {
+		fileTypes[fileTypeDescription] = count + 1
+	}
+
+	fileTypesAsStr, err := p.ToFileTypeAsString(fileTypes)
+	if err != nil {
+		return err
+	}
+
+	return db.Model(&p).Updates(&mcmodel.Project{FileTypes: fileTypesAsStr, FileCount: p.FileCount + 1}).Error
 }
 
 func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, error) {

@@ -566,7 +566,7 @@ func (n *Node) createNewMCFileVersion(transferRequest mcmodel.TransferRequest) (
 		Current:     false,
 	}
 
-	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory, transferRequest)
+	newFile, err = fileStore.CreateNewFileVersion(newFile, n.file.Directory, transferRequest)
 	if err != nil {
 		return nil, err
 	}

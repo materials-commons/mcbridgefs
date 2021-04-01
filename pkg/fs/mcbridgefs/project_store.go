@@ -22,57 +22,30 @@ func (s *ProjectStore) GetProjectsForUser(userID int) (error, []mcmodel.Project)
 	return err, projects
 }
 
-func (s *ProjectStore) IncrementProjectFileTypeCount(project mcmodel.Project, fileTypeIncrements map[string]int) error {
+func (s *ProjectStore) UpdateProjectSizeAndFileCount(projectID int, size int64, fileCount int) error {
 	return s.withTxRetry(func(tx *gorm.DB) error {
 		var p mcmodel.Project
 		// Get latest project
-		if result := tx.Find(&p, project.ID); result.Error != nil {
+		if result := tx.Find(&p, projectID); result.Error != nil {
 			return result.Error
 		}
 
-		fileTypes, err := p.GetFileTypes()
-		if err != nil {
-			return err
-		}
-
-		for key := range fileTypeIncrements {
-			count, ok := fileTypes[key]
-			if !ok {
-				fileTypes[key] = fileTypeIncrements[key]
-			} else {
-				fileTypes[key] = count + fileTypeIncrements[key]
-			}
-		}
-
-		fileTypesAsStr, err := p.ToFileTypeAsString(fileTypes)
-		return tx.Model(p).Update("file_types", fileTypesAsStr).Error
-	})
-}
-
-func (s *ProjectStore) UpdateProjectSizeAndFileCount(project mcmodel.Project, size int64, fileCount int) error {
-	return s.withTxRetry(func(tx *gorm.DB) error {
-		var p mcmodel.Project
-		// Get latest project
-		if result := tx.Find(&p, project.ID); result.Error != nil {
-			return result.Error
-		}
-
-		return tx.Model(project).Updates(mcmodel.Project{
+		return tx.Model(&p).Updates(mcmodel.Project{
 			FileCount: p.FileCount + fileCount,
-			Size: p.Size + size,
+			Size:      p.Size + size,
 		}).Error
 	})
 }
 
-func (s *ProjectStore) UpdateProjectDirectoryCount(project mcmodel.Project, directoryCount int) error {
+func (s *ProjectStore) UpdateProjectDirectoryCount(projectID int, directoryCount int) error {
 	return s.withTxRetry(func(tx *gorm.DB) error {
 		var p mcmodel.Project
 		// Get latest project
-		if result := tx.Find(&p, project.ID); result.Error != nil {
+		if result := tx.Find(&p, projectID); result.Error != nil {
 			return result.Error
 		}
 
-		return tx.Model(project).Updates(mcmodel.Project{
+		return tx.Model(&p).Updates(mcmodel.Project{
 			DirectoryCount: p.DirectoryCount + directoryCount,
 		}).Error
 	})

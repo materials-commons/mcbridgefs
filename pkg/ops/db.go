@@ -27,18 +27,18 @@ func MustConnectToDB() *gorm.DB {
 
 	retryCount := 1
 	for {
-		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err == nil {
-			break
-		}
-
-		if retryCount == maxDBRetries {
+		db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig)
+		switch {
+		case err == nil:
+			// Connected to db, yay!
+			return db
+		case retryCount == maxDBRetries:
+			// Retry limit exceeded :-(
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
+		default:
+			// Couldn't connect, so increment count, then wait a bit before trying again.
+			retryCount++
+			time.Sleep(3 * time.Second)
 		}
-
-		time.Sleep(3 * time.Second)
-
-		retryCount++
 	}
-
-	return db
 }

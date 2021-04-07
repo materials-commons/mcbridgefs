@@ -24,12 +24,8 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
+	"github.com/materials-commons/mcbridgefs/pkg/ops"
 	"github.com/spf13/cobra"
 )
 
@@ -62,18 +58,7 @@ file versions and consistency for the project that the transfer request is assoc
 			log.Fatalf("No path specified for mount.")
 		}
 
-		var (
-			err error
-			db  *gorm.DB
-		)
-
-		gormConfig := &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Silent),
-		}
-
-		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
-			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
-		}
+		db := ops.MustConnectToDB()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		_ = ctx

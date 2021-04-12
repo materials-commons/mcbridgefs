@@ -32,7 +32,7 @@ func MustConnectToDB() *gorm.DB {
 		case err == nil:
 			// Connected to db, yay!
 			return db
-		case retryCount == maxDBRetries:
+		case retryCount >= maxDBRetries:
 			// Retry limit exceeded :-(
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		default:

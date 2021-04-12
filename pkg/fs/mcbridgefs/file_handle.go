@@ -14,8 +14,9 @@ import (
 
 type FileHandle struct {
 	*bridgefs.BridgeFileHandle
-	Flags uint32
-	Path  string
+	Flags      uint32
+	Path       string
+	TotalBytes int64
 }
 
 var _ = (fs.FileHandle)((*FileHandle)(nil))
@@ -37,6 +38,7 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 		BridgeFileHandle: bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle),
 		Flags:            flags,
 		Path:             path,
+		TotalBytes:       0,
 	}
 }
 
@@ -55,6 +57,8 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 	if file != nil && n > 0 {
 		_, _ = io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
 	}
+
+	f.TotalBytes = f.TotalBytes + int64(n)
 
 	return uint32(n), fs.OK
 }

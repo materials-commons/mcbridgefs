@@ -521,6 +521,11 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		return fs.OK
 	}
 
+	err, transferRequest := n.getTransferRequest("")
+	if err != nil {
+		return syscall.EINVAL
+	}
+
 	// If we are here then the file was opened with a write flag. In this case we need to update the
 	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
 	// TODO: is n.file even valid anymore?
@@ -536,7 +541,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		checksum = fmt.Sprintf("%x", nf.hasher.Sum(nil))
 	}
 
-	return fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum))
+	return fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, fh.TotalBytes))
 }
 
 // createNewMCFileVersion creates a new file version if there isn't already a version of the file

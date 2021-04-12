@@ -20,7 +20,8 @@ func NewFileStore(db *gorm.DB, mcfsRoot string) *FileStore {
 	return &FileStore{db: db, mcfsRoot: mcfsRoot}
 }
 
-func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error {
+// MarkFileReleased is open called for files that were created or opened with the Write flag set.
+func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string, projectID int, totalBytes int64) error {
 	finfo, err := os.Stat(file.ToUnderlyingFilePath(s.mcfsRoot))
 	if err != nil {
 		log.Errorf("MarkFileReleased Stat %s failed: %s", file.ToUnderlyingFilePath(s.mcfsRoot), err)
@@ -48,17 +49,32 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string) error 
 
 		// Now we can update the meta data on the current file. This includes, the size, current, and if there is
 		// a new computed checksum, also update the checksum field.
-		if checksum != "" {
-			return tx.Model(file).Updates(mcmodel.File{
+		switch {
+		case checksum != "":
+			// If we are here then the file was written to so besides updating the file meta data we also have
+			// to update the project size meta data
+			fileMetadata := mcmodel.File{
 				Size:     uint64(finfo.Size()),
 				Current:  true,
 				Checksum: checksum,
-			}).Error
-		}
+			}
 
-		// If we are here then the file was opened for read/write but it was never written to. In this situation there
-		// is no checksum that has been computed, so don't update the field.
-		return tx.Model(file).Updates(mcmodel.File{Size: uint64(finfo.Size()), Current: true}).Error
+			if err := tx.Model(file).Updates(&fileMetadata).Error; err != nil {
+				return err
+			}
+
+			var project mcmodel.Project
+
+			if result := db.Find(&project, projectID); result.Error != nil {
+				return result.Error
+			}
+
+			return db.Model(&project).Updates(&mcmodel.Project{Size: project.Size + totalBytes}).Error
+		default:
+			// If we are here then the file was opened for read/write but it was never written to. In this situation there
+			// is no checksum that has been computed, so don't update the field.
+			return tx.Model(file).Updates(mcmodel.File{Size: uint64(finfo.Size()), Current: true}).Error
+		}
 	})
 }
 
@@ -196,6 +212,11 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transfer
 			return nil
 		}
 
+		var project mcmodel.Project
+		if result := db.Find(&project, transferRequest.ProjectID); result.Error != nil {
+			return result.Error
+		}
+
 		dir = mcmodel.File{
 			OwnerID:              transferRequest.OwnerID,
 			MimeType:             "directory",
@@ -211,7 +232,11 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transfer
 			return err
 		}
 
-		return tx.Create(&dir).Error
+		if err := tx.Create(&dir).Error; err != nil {
+			return err
+		}
+
+		return db.Model(&project).Updates(&mcmodel.Project{DirectoryCount: project.DirectoryCount + 1}).Error
 	})
 
 	return &dir, err

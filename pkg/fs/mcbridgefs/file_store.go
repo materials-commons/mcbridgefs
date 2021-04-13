@@ -20,7 +20,7 @@ func NewFileStore(db *gorm.DB, mcfsRoot string) *FileStore {
 	return &FileStore{db: db, mcfsRoot: mcfsRoot}
 }
 
-// MarkFileReleased is open called for files that were created or opened with the Write flag set.
+// MarkFileReleased should only called for files that were created or opened with the Write flag set.
 func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string, projectID int, totalBytes int64) error {
 	finfo, err := os.Stat(file.ToUnderlyingFilePath(s.mcfsRoot))
 	if err != nil {

@@ -15,6 +15,7 @@ type GlobusTaskMonitor struct {
 	db                  *gorm.DB
 	endpointID          string
 	finishedGlobusTasks map[string]bool
+	lastProcessedTime   time.Time
 }
 
 func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
@@ -23,6 +24,8 @@ func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string)
 		db:                  db,
 		endpointID:          endpointID,
 		finishedGlobusTasks: make(map[string]bool),
+		// set lastProcessedTime to a date far in the past so that we initially match all requests
+		lastProcessedTime: time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -49,6 +52,8 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	taskFilter := map[string]string{
 		"filter_completion_time": lastWeek,
 		"filter_status":          "SUCCEEDED",
+		"orderby":                "completion_time ASC",
+		"limit":                  "1000",
 	}
 	tasks, err := m.client.GetEndpointTaskList(m.endpointID, taskFilter)
 
@@ -58,6 +63,10 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	}
 
 	for _, task := range tasks.Tasks {
+		if !m.processTask(task) {
+			continue
+		}
+
 		//log.Infof("Getting successful transfers for Globus Task %s", task.TaskID)
 		transfers, err := m.client.GetTaskSuccessfulTransfers(task.TaskID, 0)
 
@@ -82,6 +91,17 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	}
 }
 
+func (m *GlobusTaskMonitor) processTask(task globus.Task) bool {
+	taskCompletionTime, err := time.Parse(time.RFC3339, task.CompletionTime)
+	if err != nil {
+		log.Errorf("Error parsing task time '%s': %s", task.CompletionTime, err)
+		return false
+	}
+
+	// task was completed since the last process task, so this task has not yet been processed
+	return taskCompletionTime.After(m.lastProcessedTime)
+}
+
 func (m *GlobusTaskMonitor) processTransfers(transfers *globus.TransferItems) {
 	transferItem := transfers.Transfers[0]
 
@@ -90,13 +110,13 @@ func (m *GlobusTaskMonitor) processTransfers(transfers *globus.TransferItems) {
 		return
 	}
 
-	// Destination path will have the following format: /__globus_uploads/<id of upload request>/...rest of path...
-	// Split will return ["", "__globus_uploads", "<id of upload request", ....]
+	// Destination path will have the following format: /__transfers/globus/<user-id>/<project-id>/...rest of path...
+	// Split will return ["", "__transfers", "globus", "<user-id>", "<project-id>", ...]
 	// So the 3rd entry in the array is the id in the globus_uploads table we want to look up.
 	pieces := strings.Split(transferItem.DestinationPath, "/")
-	if len(pieces) < 4 {
-		// sanity check, because the destination path should at least be /__globus_uploads/<id>/...rest of path...
-		// it should at least have 4 entries in it (See Split return description above)
+	if len(pieces) < 5 {
+		// sanity check, because the destination path should at least be /__transfers/globus/<user-id>/<project-id>/...rest of path...
+		// so it should at least have 5 entries in it (See Split return description above)
 		log.Infof("Invalid globus DestinationPath: %s", transferItem.DestinationPath)
 		return
 	}

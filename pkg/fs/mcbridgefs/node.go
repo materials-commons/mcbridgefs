@@ -298,11 +298,11 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 		return n.lookupProjectPath(ctx, name, out, transferPathContext)
 		//return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
 	case transferPathContext.IsProject():
-		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+		return n.NewInode(ctx, node2, fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: inodeHashFromPath(path2)}), fs.OK
 	case transferPathContext.IsUserID():
-		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+		return n.NewInode(ctx, node2, fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: inodeHashFromPath(path2)}), fs.OK
 	case transferPathContext.IsGlobusTransferType():
-		return n.NewInode(ctx, node2, n.makeTestStableAttr(path2)), fs.OK
+		return n.NewInode(ctx, node2, fs.StableAttr{Mode: 0755 | uint32(syscall.S_IFDIR), Ino: inodeHashFromPath(path2)}), fs.OK
 	default:
 		// should never happen
 		//fmt.Println("   Lookup default")
@@ -707,8 +707,12 @@ func (n *Node) inodeHash(entry *mcmodel.File) uint64 {
 		return 1
 	}
 
+	return inodeHashFromPath(entry.FullPath())
+}
+
+func inodeHashFromPath(path string) uint64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(entry.FullPath()))
+	_, _ = h.Write([]byte(path))
 	return h.Sum64()
 }
 

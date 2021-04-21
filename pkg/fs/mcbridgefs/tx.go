@@ -2,7 +2,7 @@ package mcbridgefs
 
 import "gorm.io/gorm"
 
-func withTxRetry(fn func(tx *gorm.DB) error, db *gorm.DB, retryCount int) error {
+func WithTxRetry(fn func(tx *gorm.DB) error, db *gorm.DB, retryCount int) error {
 	var err error
 
 	if retryCount < 3 {
@@ -19,6 +19,6 @@ func withTxRetry(fn func(tx *gorm.DB) error, db *gorm.DB, retryCount int) error 
 	return err
 }
 
-func withTxRetryDefault(fn func(tx *gorm.DB) error, db *gorm.DB) error {
-	return withTxRetry(fn, db, txRetryCount)
+func WithTxRetryDefault(fn func(tx *gorm.DB) error, db *gorm.DB) error {
+	return WithTxRetry(fn, db, txRetryCount)
 }

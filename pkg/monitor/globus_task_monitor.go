@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,19 +12,19 @@ import (
 )
 
 type GlobusTaskMonitor struct {
-	client              *globus.Client
-	db                  *gorm.DB
-	endpointID          string
-	finishedGlobusTasks map[string]bool
-	lastProcessedTime   time.Time
+	client                       *globus.Client
+	db                           *gorm.DB
+	endpointID                   string
+	lastUserProjectProcessedTime map[string]time.Time
+	lastProcessedTime            time.Time
 }
 
 func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
 	return &GlobusTaskMonitor{
-		client:              client,
-		db:                  db,
-		endpointID:          endpointID,
-		finishedGlobusTasks: make(map[string]bool),
+		client:                       client,
+		db:                           db,
+		endpointID:                   endpointID,
+		lastUserProjectProcessedTime: make(map[string]time.Time),
 		// set lastProcessedTime to a date far in the past so that we initially match all requests
 		lastProcessedTime: time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
 	}
@@ -63,7 +64,13 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	}
 
 	for _, task := range tasks.Tasks {
-		if !m.processTask(task) {
+		taskCompletionTime, err := time.Parse(time.RFC3339, task.CompletionTime)
+		switch {
+		case err != nil:
+			log.Errorf("Error parsing task time '%s': %s", task.CompletionTime, err)
+			continue
+		case m.lastProcessedTime.After(taskCompletionTime):
+			// Task finished before the lastProcessedTime, so we've already seen it and don't need to re-process it.
 			continue
 		}
 
@@ -79,7 +86,7 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 			continue
 		default:
 			// Files were transferred for this request
-			m.processTransfers(&transfers)
+			m.processTransfers(taskCompletionTime, &transfers)
 		}
 
 		// Check if we should stop processing requests
@@ -91,18 +98,7 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	}
 }
 
-func (m *GlobusTaskMonitor) processTask(task globus.Task) bool {
-	taskCompletionTime, err := time.Parse(time.RFC3339, task.CompletionTime)
-	if err != nil {
-		log.Errorf("Error parsing task time '%s': %s", task.CompletionTime, err)
-		return false
-	}
-
-	// task was completed since the last process task, so this task has not yet been processed
-	return taskCompletionTime.After(m.lastProcessedTime)
-}
-
-func (m *GlobusTaskMonitor) processTransfers(transfers *globus.TransferItems) {
+func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, transfers *globus.TransferItems) {
 	transferItem := transfers.Transfers[0]
 
 	// Transfer items with a blank DestinationPath are downloads not uploads.
@@ -121,51 +117,49 @@ func (m *GlobusTaskMonitor) processTransfers(transfers *globus.TransferItems) {
 		return
 	}
 
-	id := pieces[2] // id is the 3rd entry in the path
-	if _, ok := m.finishedGlobusTasks[id]; ok {
-		// We've seen this globus task before and already processed it
+	// Look up the project this transfer is associated with. If the project processing time for this user id is less
+	// than the taskCompletionTime then we need to process this transfer.
+	id := fmt.Sprintf("%s_%s_%s", pieces[2], pieces[3], pieces[4])
+	if lastProcessingTime, ok := m.lastUserProjectProcessedTime[id]; ok {
+		// Found project entry for this user, lets check the time completion time
+		if taskCompletionTime.Before(lastProcessingTime) {
+			// Project was processed after the taskCompletionTime, so this means we've already processed this
+			// user/project entry. We are looking for taskCompletionTimes that are after the projects lastProcessingTime
+			// as those are tasks that haven't been processed yet.
+			return
+		}
+	}
+
+	// If we are here then we know that this user/project combo needs to be processed. So, first thing we have
+	// to do is tell that file system instance not to accept any more requests for this user/project combo,
+	m.lockUserProjectFS(id)
+	defer m.unlockUserProjectFS(id)
+
+	if !m.userProjectFSInactive(id) {
+		// There have been writes since we attempted the lock...
 		return
 	}
 
-	//globusUpload, err := m.globusUploads.GetGlobusUpload(id)
-	//if err != nil {
-	//	// If we find a Globus task, but no corresponding entry in our database that means at some
-	//	// earlier point in time we processed the task by turning it into a file load request and
-	//	// deleting globus upload from our database. So this is an old reference we can just ignore.
-	//	// Add the entry to our hash table of completed requests.
-	//	m.finishedGlobusTasks[id] = true
-	//	return
-	//}
+	// Processing entries simply means cleaning up all the files in the transfer, because those are the files that
+	// have been completed.
+	for _, transfer := range transfers.Transfers {
+		m.processFileTransfer(id, transfer.DestinationPath)
+	}
+}
 
-	// At this point we have a globus upload. What we are going to do is remove the ACL on the directory
-	// so no more files can be uploaded to it. Then we are going to add that directory to the list of
-	// directories to upload. Then the file loader will eventually get around to loading these files. In
-	// the meantime since we've now created a file load from this globus upload we can delete the entry
-	// from the globus_uploads table. Finally we are going to update the status for this background process.
+func (m *GlobusTaskMonitor) lockUserProjectFS(id string) {
 
-	log.Infof("Processing globus upload %s", id)
+}
 
-	//if _, err := m.client.DeleteEndpointACLRule(m.endpointID, globusUpload.GlobusAclID); err != nil {
-	//	log.Infof("Unable to delete ACL: %s", err)
-	//}
+func (m *GlobusTaskMonitor) unlockUserProjectFS(id string) {
 
-	//flAdd := model.AddFileLoadModel{
-	//	ProjectID:      globusUpload.ProjectID,
-	//	Owner:          globusUpload.Owner,
-	//	Path:           globusUpload.Path,
-	//	GlobusUploadID: globusUpload.ID,
-	//}
+}
 
-	//if fl, err := m.fileLoads.AddFileLoad(flAdd); err != nil {
-	//	log.Infof("Unable to add file load request: %s", err)
-	//	return
-	//} else {
-	//	log.Infof("Created file load (id: %s) for globus upload %s", fl.ID, id)
-	//}
+func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {
+	return true
+}
 
-	// Delete the globus upload request as we have now turned it into a file loading request
-	// and won't have to process this request again. If the server stops while loading the
-	// request or there is some other failure, the file loader will take care of picking up
-	// where it left off.
-	//m.globusUploads.DeleteGlobusUpload(id)
+func (m *GlobusTaskMonitor) processFileTransfer(id string, path string) {
+	// Look at file according to path, user, and project
+	// Remove transfer request file
 }

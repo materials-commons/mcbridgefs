@@ -1,4 +1,4 @@
-package mcbridgefs
+package store
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"github.com/apex/log"
 	"github.com/hashicorp/go-uuid"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"gorm.io/gorm"
 )
 
@@ -65,11 +66,11 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string, projec
 
 			var project mcmodel.Project
 
-			if result := db.Find(&project, projectID); result.Error != nil {
+			if result := s.db.Find(&project, projectID); result.Error != nil {
 				return result.Error
 			}
 
-			return db.Model(&project).Updates(&mcmodel.Project{Size: project.Size + totalBytes}).Error
+			return s.db.Model(&project).Updates(&mcmodel.Project{Size: project.Size + totalBytes}).Error
 		default:
 			// If we are here then the file was opened for read/write but it was never written to. In this situation there
 			// is no checksum that has been computed, so don't update the field.
@@ -153,7 +154,7 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferReq
 		}
 
 		if updateProject {
-			return incrementProjectFileTypeCountAndFilesCount(db, transferRequest.ProjectID, Mime2Description(file.MimeType))
+			return incrementProjectFileTypeCountAndFilesCount(s.db, transferRequest.ProjectID, mcbridgefs.Mime2Description(file.MimeType))
 		}
 
 		return nil
@@ -213,7 +214,7 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transfer
 		}
 
 		var project mcmodel.Project
-		if result := db.Find(&project, transferRequest.ProjectID); result.Error != nil {
+		if result := s.db.Find(&project, transferRequest.ProjectID); result.Error != nil {
 			return result.Error
 		}
 
@@ -236,7 +237,7 @@ func (s *FileStore) CreateDirectory(parentDirID int, path, name string, transfer
 			return err
 		}
 
-		return db.Model(&project).Updates(&mcmodel.Project{DirectoryCount: project.DirectoryCount + 1}).Error
+		return s.db.Model(&project).Updates(&mcmodel.Project{DirectoryCount: project.DirectoryCount + 1}).Error
 	})
 
 	return &dir, err
@@ -332,5 +333,5 @@ func (s *FileStore) UpdateFileUses(file *mcmodel.File, uuid string, fileID int) 
 }
 
 func (s *FileStore) withTxRetry(fn func(tx *gorm.DB) error) error {
-	return withTxRetryDefault(fn, s.db)
+	return mcbridgefs.WithTxRetryDefault(fn, s.db)
 }

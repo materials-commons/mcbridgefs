@@ -1,4 +1,4 @@
-package mcbridgefs
+package store
 
 import (
 	"github.com/materials-commons/gomcdb/mcmodel"

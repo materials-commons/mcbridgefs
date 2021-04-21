@@ -1,7 +1,8 @@
-package mcbridgefs
+package store
 
 import (
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"gorm.io/gorm"
 )
 
@@ -52,5 +53,5 @@ func (s *ProjectStore) UpdateProjectDirectoryCount(projectID int, directoryCount
 }
 
 func (s *ProjectStore) withTxRetry(fn func(tx *gorm.DB) error) error {
-	return withTxRetryDefault(fn, s.db)
+	return mcbridgefs.WithTxRetryDefault(fn, s.db)
 }

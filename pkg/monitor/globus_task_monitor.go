@@ -8,6 +8,8 @@ import (
 
 	"github.com/apex/log"
 	globus "github.com/materials-commons/goglobus"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -17,6 +19,7 @@ type GlobusTaskMonitor struct {
 	endpointID                   string
 	lastUserProjectProcessedTime map[string]time.Time
 	lastProcessedTime            time.Time
+	fileStore                    store.FileStore
 }
 
 func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
@@ -161,5 +164,13 @@ func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {
 
 func (m *GlobusTaskMonitor) processFileTransfer(id string, path string) {
 	// Look at file according to path, user, and project
+	transferPathContext := mcbridgefs.ToTransferPathContext(path)
+	dir, err := m.fileStore.FindDirByPath(transferPathContext.ProjectID, transferPathContext.ToPath())
+	if err != nil {
+		// do something?
+		return
+	}
+	_ = dir
+	//m.fileStore.GetFileByPath()
 	// Remove transfer request file
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -32,9 +33,9 @@ var (
 	db                 *gorm.DB
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
-	fileStore          *FileStore
-	projectStore       *ProjectStore
-	userStore          *UserStore
+	fileStore          *store.FileStore
+	projectStore       *store.ProjectStore
+	userStore          *store.UserStore
 )
 
 func init() {
@@ -66,9 +67,9 @@ func init() {
 func CreateFS(fsRoot string, dB *gorm.DB) *Node {
 	mcfsRoot = fsRoot
 	db = dB
-	fileStore = NewFileStore(dB, fsRoot)
-	projectStore = NewProjectStore(db)
-	userStore = NewUserStore(db)
+	fileStore = store.NewFileStore(dB, fsRoot)
+	projectStore = store.NewProjectStore(db)
+	userStore = store.NewUserStore(db)
 	return rootNode()
 }
 

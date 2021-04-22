@@ -24,6 +24,12 @@ func UnlockFS(c *TransferPathContext) {
 	fsLocks.Delete(key)
 }
 
+func LockedFS(c *TransferPathContext) bool {
+	key := lockKey(c)
+	_, found := fsLocks.Load(key)
+	return found
+}
+
 func lockKey(c *TransferPathContext) string {
 	return filepath.Join("/", c.TransferType, fmt.Sprintf("%d", c.UserID), fmt.Sprintf("%d", c.ProjectID))
 }

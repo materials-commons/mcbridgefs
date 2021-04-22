@@ -14,9 +14,10 @@ import (
 
 type FileHandle struct {
 	*bridgefs.BridgeFileHandle
-	Flags      uint32
-	Path       string
-	TotalBytes int64
+	Flags               uint32
+	Path                string
+	TotalBytes          int64
+	transferPathContext *TransferPathContext
 }
 
 var _ = (fs.FileHandle)((*FileHandle)(nil))
@@ -35,16 +36,21 @@ var _ = (fs.FileAllocater)((*FileHandle)(nil))
 
 func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 	return &FileHandle{
-		BridgeFileHandle: bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle),
-		Flags:            flags,
-		Path:             path,
-		TotalBytes:       0,
+		BridgeFileHandle:    bridgefs.NewBridgeFileHandle(fd).(*bridgefs.BridgeFileHandle),
+		Flags:               flags,
+		Path:                path,
+		TotalBytes:          0,
+		transferPathContext: ToTransferPathContext(path),
 	}
 }
 
 // Write overrides the BridgeFileHandle write to incorporate updating the checksum as bytes
 // are written to the file.
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+	if LockedFS(f.transferPathContext) {
+		return 0, syscall.EIO
+	}
+
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 

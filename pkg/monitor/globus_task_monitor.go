@@ -136,8 +136,9 @@ func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, trans
 
 	// If we are here then we know that this user/project combo needs to be processed. So, first thing we have
 	// to do is tell that file system instance not to accept any more requests for this user/project combo,
-	m.lockUserProjectFS(id)
-	defer m.unlockUserProjectFS(id)
+	c := mcbridgefs.ToTransferPathContext(transferItem.DestinationPath)
+	mcbridgefs.LockFS(c)
+	defer mcbridgefs.UnlockFS(c)
 
 	if !m.userProjectFSInactive(id) {
 		// There have been writes since we attempted the lock...
@@ -149,14 +150,6 @@ func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, trans
 	for _, transfer := range transfers.Transfers {
 		m.processFileTransfer(id, transfer.DestinationPath)
 	}
-}
-
-func (m *GlobusTaskMonitor) lockUserProjectFS(id string) {
-
-}
-
-func (m *GlobusTaskMonitor) unlockUserProjectFS(id string) {
-
 }
 
 func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {

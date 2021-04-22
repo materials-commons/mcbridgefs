@@ -32,7 +32,6 @@ var (
 	mcfsRoot           string
 	db                 *gorm.DB
 	openedFilesTracker *OpenFilesTracker
-	txRetryCount       int
 	fileStore          *store.FileStore
 	projectStore       *store.ProjectStore
 	userStore          *store.UserStore
@@ -48,16 +47,6 @@ func init() {
 	gid32, _ := strconv.ParseUint(u.Gid, 10, 32)
 	uid = uint32(uid32)
 	gid = uint32(gid32)
-
-	// All updates and creates to the database are wrapped in a transaction. These transactions may need to be
-	// retried, especially when they fail because two transactions are deadlocked trying to acquire a lock on
-	// a foreign table reference.
-	txRetryCount64, err := strconv.ParseInt(os.Getenv("MC_TX_RETRY"), 10, 32)
-	if err != nil || txRetryCount64 < 3 {
-		txRetryCount64 = 3
-	}
-
-	txRetryCount = int(txRetryCount64)
 
 	// Track any files that this instance writes to/create, so that if another instance does the same
 	// each of them will see their versions of the file, rather than intermixing them.
@@ -107,7 +96,6 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	filesList2 := make([]fuse.DirEntry, 0)
 
 	transferPathContext := n.ToTransferPathContext("")
-	_ = transferPathContext
 
 	switch {
 	//case transferPathContext.IsPath():

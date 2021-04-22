@@ -333,5 +333,5 @@ func (s *FileStore) UpdateFileUses(file *mcmodel.File, uuid string, fileID int) 
 }
 
 func (s *FileStore) withTxRetry(fn func(tx *gorm.DB) error) error {
-	return mcbridgefs.WithTxRetryDefault(fn, s.db)
+	return WithTxRetryDefault(fn, s.db)
 }

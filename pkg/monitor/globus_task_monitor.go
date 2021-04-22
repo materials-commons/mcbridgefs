@@ -19,7 +19,7 @@ type GlobusTaskMonitor struct {
 	endpointID                   string
 	lastUserProjectProcessedTime map[string]time.Time
 	lastProcessedTime            time.Time
-	fileStore                    store.FileStore
+	transferRequestFileStore     *store.TransferRequestFileStore
 }
 
 func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
@@ -29,7 +29,8 @@ func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string)
 		endpointID:                   endpointID,
 		lastUserProjectProcessedTime: make(map[string]time.Time),
 		// set lastProcessedTime to a date far in the past so that we initially match all requests
-		lastProcessedTime: time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
+		lastProcessedTime:        time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
+		transferRequestFileStore: store.NewTransferRequestFileStore(db),
 	}
 }
 
@@ -164,13 +165,8 @@ func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {
 
 func (m *GlobusTaskMonitor) processFileTransfer(id string, path string) {
 	// Look at file according to path, user, and project
-	transferPathContext := mcbridgefs.ToTransferPathContext(path)
-	dir, err := m.fileStore.FindDirByPath(transferPathContext.ProjectID, transferPathContext.ToPath())
-	if err != nil {
-		// do something?
-		return
+	c := mcbridgefs.ToTransferPathContext(path)
+	if err := m.transferRequestFileStore.DeleteTransferFileRequestByPath(c.UserID, c.ProjectID, path); err != nil {
+		log.Errorf("Unable to delete transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
 	}
-	_ = dir
-	//m.fileStore.GetFileByPath()
-	// Remove transfer request file
 }

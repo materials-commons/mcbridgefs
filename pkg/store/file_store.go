@@ -43,7 +43,7 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string, projec
 
 		err = tx.Model(&mcmodel.TransferRequestFile{}).
 			Where("file_id = ?", file.ID).
-			Update("state", "done").Error
+			Update("state", "closed").Error
 		if err != nil {
 			return err
 		}
@@ -76,6 +76,14 @@ func (s *FileStore) MarkFileReleased(file *mcmodel.File, checksum string, projec
 			// is no checksum that has been computed, so don't update the field.
 			return tx.Model(file).Updates(mcmodel.File{Size: uint64(finfo.Size()), Current: true}).Error
 		}
+	})
+}
+
+func (s *FileStore) MarkFileAsOpen(file *mcmodel.File) error {
+	return s.withTxRetry(func(tx *gorm.DB) error {
+		return tx.Model(&mcmodel.TransferRequestFile{}).
+			Where("file_id = ?", file.ID).
+			Update("state", "open").Error
 	})
 }
 
@@ -145,7 +153,7 @@ func (s *FileStore) addFileToDatabase(file *mcmodel.File, dirID int, transferReq
 			Name:              file.Name,
 			DirectoryID:       dirID,
 			FileID:            file.ID,
-			State:             "uploading",
+			State:             "open",
 			UUID:              transferFileRequestUUID,
 		}
 

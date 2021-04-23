@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
@@ -17,6 +18,7 @@ type FileHandle struct {
 	Flags               uint32
 	Path                string
 	TotalBytes          int64
+	LastAccess          time.Time
 	transferPathContext *TransferPathContext
 }
 
@@ -40,6 +42,7 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 		Flags:               flags,
 		Path:                path,
 		TotalBytes:          0,
+		LastAccess:          time.Now(),
 		transferPathContext: ToTransferPathContext(path),
 	}
 }
@@ -47,7 +50,7 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 // Write overrides the BridgeFileHandle write to incorporate updating the checksum as bytes
 // are written to the file.
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	if LockedFS(f.transferPathContext) {
+	if IsLockedFS(f.transferPathContext) {
 		return 0, syscall.EIO
 	}
 
@@ -65,6 +68,7 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 	}
 
 	f.TotalBytes = f.TotalBytes + int64(n)
+	f.LastAccess = time.Now()
 
 	return uint32(n), fs.OK
 }

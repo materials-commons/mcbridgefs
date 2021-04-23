@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type GlobusTaskMonitor struct {
 	lastUserProjectProcessedTime map[string]time.Time
 	lastProcessedTime            time.Time
 	transferRequestFileStore     *store.TransferRequestFileStore
+	settlingPeriod               time.Duration
 }
 
 func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
@@ -31,7 +33,17 @@ func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string)
 		// set lastProcessedTime to a date far in the past so that we initially match all requests
 		lastProcessedTime:        time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
 		transferRequestFileStore: store.NewTransferRequestFileStore(db),
+		settlingPeriod:           getSettlingPeriod(),
 	}
+}
+
+func getSettlingPeriod() time.Duration {
+	d, err := time.ParseDuration(os.Getenv("MC_GLOBUS_SETTLING_PERIOD"))
+	if err != nil || d.Seconds() < 10 {
+		return 10 * time.Second
+	}
+
+	return d
 }
 
 func (m *GlobusTaskMonitor) Start(ctx context.Context) {
@@ -148,7 +160,7 @@ func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, trans
 	// Processing entries simply means cleaning up all the files in the transfer, because those are the files that
 	// have been completed.
 	for _, transfer := range transfers.Transfers {
-		m.processFileTransfer(id, transfer.DestinationPath)
+		m.processFileTransfer(taskCompletionTime, transfer.DestinationPath)
 	}
 }
 
@@ -156,10 +168,21 @@ func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {
 	return true
 }
 
-func (m *GlobusTaskMonitor) processFileTransfer(id string, path string) {
+func (m *GlobusTaskMonitor) processFileTransfer(taskCompletionTime time.Time, path string) {
 	// Look at file according to path, user, and project
 	c := mcbridgefs.ToTransferPathContext(path)
-	if err := m.transferRequestFileStore.DeleteTransferFileRequestByPath(c.UserID, c.ProjectID, path); err != nil {
+	transferRequestFile, err := m.transferRequestFileStore.GetTransferFileRequestByPath(c.UserID, c.ProjectID, path)
+	if err != nil {
+		log.Errorf("Unable to find transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
+		return
+	}
+
+	if transferRequestFile.UpdatedAt.After(taskCompletionTime) {
+		// file was possibly changed since the task completed so ignore
+		return
+	}
+
+	if err := m.transferRequestFileStore.DeleteTransferRequestFile(transferRequestFile); err != nil {
 		log.Errorf("Unable to delete transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
 	}
 }

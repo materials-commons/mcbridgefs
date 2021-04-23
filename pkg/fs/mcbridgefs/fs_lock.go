@@ -24,7 +24,7 @@ func UnlockFS(c *TransferPathContext) {
 	fsLocks.Delete(key)
 }
 
-func LockedFS(c *TransferPathContext) bool {
+func IsLockedFS(c *TransferPathContext) bool {
 	key := lockKey(c)
 	_, found := fsLocks.Load(key)
 	return found

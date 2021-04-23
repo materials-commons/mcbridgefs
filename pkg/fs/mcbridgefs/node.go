@@ -449,6 +449,8 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 			}
 
 			openedFilesTracker.Store(path, newFile)
+		} else {
+			_ = fileStore.MarkFileAsOpen(newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND
@@ -461,6 +463,9 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				return nil, 0, syscall.EIO
 			}
 			openedFilesTracker.Store(path, newFile)
+		} else {
+			// Update the transfer request file to state open
+			_ = fileStore.MarkFileAsOpen(newFile)
 		}
 		flags = flags &^ syscall.O_CREAT
 		flags = flags &^ syscall.O_APPEND

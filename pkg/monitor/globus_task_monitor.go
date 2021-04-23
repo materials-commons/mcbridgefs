@@ -152,11 +152,6 @@ func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, trans
 	mcbridgefs.LockFS(c)
 	defer mcbridgefs.UnlockFS(c)
 
-	if !m.userProjectFSInactive(id) {
-		// There have been writes since we attempted the lock...
-		return
-	}
-
 	// Processing entries simply means cleaning up all the files in the transfer, because those are the files that
 	// have been completed.
 	for _, transfer := range transfers.Transfers {
@@ -164,25 +159,29 @@ func (m *GlobusTaskMonitor) processTransfers(taskCompletionTime time.Time, trans
 	}
 }
 
-func (m *GlobusTaskMonitor) userProjectFSInactive(id string) bool {
-	return true
-}
-
 func (m *GlobusTaskMonitor) processFileTransfer(taskCompletionTime time.Time, path string) {
 	// Look at file according to path, user, and project
 	c := mcbridgefs.ToTransferPathContext(path)
 	transferRequestFile, err := m.transferRequestFileStore.GetTransferFileRequestByPath(c.UserID, c.ProjectID, path)
-	if err != nil {
+	switch {
+	case err != nil:
 		log.Errorf("Unable to find transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
 		return
-	}
-
-	if transferRequestFile.UpdatedAt.After(taskCompletionTime) {
+	case transferRequestFile.UpdatedAt.After(taskCompletionTime):
 		// file was possibly changed since the task completed so ignore
 		return
+	case transferRequestFile.UpdatedAt.After(taskCompletionTime):
+		// file was possibly changed since the task completed so ignore
+		return
+	case transferRequestFile.State == "open":
+		// file still open, which means there is another transfer request accessing it
+		return
+	default:
+		if err := m.transferRequestFileStore.DeleteTransferRequestFile(transferRequestFile); err != nil {
+			log.Errorf("Unable to delete transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
+			return
+		}
+		// TODO: need to remove entry from openedFilesTracker
 	}
 
-	if err := m.transferRequestFileStore.DeleteTransferRequestFile(transferRequestFile); err != nil {
-		log.Errorf("Unable to delete transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
-	}
 }

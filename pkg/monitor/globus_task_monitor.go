@@ -8,32 +8,37 @@ import (
 
 	"github.com/apex/log"
 	globus "github.com/materials-commons/goglobus"
-	"github.com/materials-commons/mcbridgefs/pkg/config"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/pkg/store"
 	"gorm.io/gorm"
 )
 
+type LastProcessingTimeSaveFn func(lastProcessingTime time.Time) error
+
+type GlobusTaskMonitorCfg struct {
+	EndpointID               string
+	SettlingPeriod           time.Duration
+	LastProcessingTimeSaveFn LastProcessingTimeSaveFn
+}
+
 type GlobusTaskMonitor struct {
 	client                       *globus.Client
 	db                           *gorm.DB
-	endpointID                   string
-	lastUserProjectProcessedTime map[string]time.Time
-	lastProcessedTime            time.Time
 	transferRequestFileStore     *store.TransferRequestFileStore
-	settlingPeriod               time.Duration
+	lastUserProjectProcessedTime map[string]time.Time
+	taskMonitorCfg               GlobusTaskMonitorCfg
+	taskMonitorInterval          time.Duration
+	lastProcessedTime            time.Time
 }
 
-func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string) *GlobusTaskMonitor {
+func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, lastProcessedTime time.Time, taskMonitorCfg GlobusTaskMonitorCfg) *GlobusTaskMonitor {
 	return &GlobusTaskMonitor{
 		client:                       client,
 		db:                           db,
-		endpointID:                   endpointID,
 		lastUserProjectProcessedTime: make(map[string]time.Time),
-		// set lastProcessedTime to a date far in the past so that we initially match all requests
-		lastProcessedTime:        time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
-		transferRequestFileStore: store.NewTransferRequestFileStore(db),
-		settlingPeriod:           config.GetGlobusSettlingPeriod(),
+		transferRequestFileStore:     store.NewTransferRequestFileStore(db),
+		taskMonitorCfg:               taskMonitorCfg,
+		lastProcessedTime:            lastProcessedTime,
 	}
 }
 
@@ -49,21 +54,21 @@ func (m *GlobusTaskMonitor) monitorAndProcessTasks(ctx context.Context) {
 		case <-ctx.Done():
 			log.Infof("Shutting down globus monitoring...")
 			return
-		case <-time.After(10 * time.Second):
+		case <-time.After(m.taskMonitorInterval):
 		}
 	}
 }
 
 func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 	// Build a filter to get all successful tasks that completed in the last week
-	lastWeek := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	filterCompletionTime := m.lastProcessedTime.Format("2006-01-02")
 	taskFilter := map[string]string{
-		"filter_completion_time": lastWeek,
+		"filter_completion_time": filterCompletionTime,
 		"filter_status":          "SUCCEEDED",
 		"orderby":                "completion_time ASC",
 		"limit":                  "1000",
 	}
-	tasks, err := m.client.GetEndpointTaskList(m.endpointID, taskFilter)
+	tasks, err := m.client.GetEndpointTaskList(m.taskMonitorCfg.EndpointID, taskFilter)
 
 	if err != nil {
 		log.Infof("globus.GetEndpointTaskList returned the following error: %s - %#v", err, m.client.GetGlobusErrorResponse())
@@ -94,6 +99,10 @@ func (m *GlobusTaskMonitor) retrieveAndProcessUploads(c context.Context) {
 		default:
 			// Files were transferred for this request
 			m.processTransfers(taskCompletionTime, &transfers)
+			m.lastProcessedTime = taskCompletionTime
+			if err := m.taskMonitorCfg.LastProcessingTimeSaveFn(m.lastProcessedTime); err != nil {
+				log.Errorf("Unable to save last processing time: %s", err)
+			}
 		}
 
 		// Check if we should stop processing requests

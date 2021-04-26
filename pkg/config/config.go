@@ -9,11 +9,12 @@ import (
 )
 
 var (
-	globusSettlingPeriod time.Duration = 0
-	txRetry                            = 0
-	globusEndpointID     string
-	mcfsDir              string
-	dotenvPath           string
+	globusSettlingPeriod      time.Duration = 0
+	globusTaskMonitorInterval time.Duration = 0
+	txRetry                   int
+	globusEndpointID          string
+	mcfsDir                   string
+	dotenvPath                string
 )
 
 func GetGlobusSettlingPeriod() time.Duration {
@@ -28,6 +29,20 @@ func GetGlobusSettlingPeriod() time.Duration {
 	}
 
 	return globusSettlingPeriod
+}
+
+func GetGlobusTaskMonitorInterval() time.Duration {
+	var err error
+	if globusTaskMonitorInterval != time.Duration(0) {
+		return globusTaskMonitorInterval
+	}
+
+	globusTaskMonitorInterval, err = time.ParseDuration(os.Getenv("MC_GLOBUS_TASK_MONITOR_INTERVAL"))
+	if err != nil || globusTaskMonitorInterval.Seconds() < 20 {
+		globusTaskMonitorInterval = 20 * time.Second
+	}
+
+	return globusTaskMonitorInterval
 }
 
 func GetTxRetry() int {

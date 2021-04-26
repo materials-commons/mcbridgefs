@@ -3,7 +3,6 @@ package mcbridgefs
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/hashicorp/go-uuid"
 	globus "github.com/materials-commons/goglobus"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/config"
 	"gorm.io/gorm"
 )
 
@@ -214,7 +214,7 @@ func setupGlobus(pathContext TransferPathContext, projectContext *ProjectTransfe
 
 	rule := globus.EndpointACLRule{
 		PrincipalType: globus.ACLPrincipalTypeIdentity,
-		EndpointID:    os.Getenv("MC_GLOBUS_ENDPOINT_ID"),
+		EndpointID:    config.MustGetGlobusEndpointID(),
 		Path:          fmt.Sprintf("/__transfers/%d/%d/", pathContext.UserID, pathContext.ProjectID),
 		IdentityID:    projectContext.globusContext.globusIdentityID,
 		Permissions:   "rw",
@@ -240,7 +240,7 @@ func cleanupTransferContext(pathContext TransferPathContext) {
 	defer transferContext.mutex.Unlock()
 
 	if pathContext.IsGlobusTransferType() {
-		endpointID := os.Getenv("MC_GLOBUS_ENDPOINT_ID")
+		endpointID := config.MustGetGlobusEndpointID()
 		if _, err := globusClient.DeleteEndpointACLRule(endpointID, transferContext.globusContext.globusACL); err != nil {
 			log.Errorf("Failed deleting ACL for %s: %s", pathContext.ProjectPathContext(), err)
 		}

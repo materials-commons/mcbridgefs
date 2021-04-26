@@ -25,6 +25,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/mcbridgefs/pkg/config"
 	"github.com/materials-commons/mcbridgefs/pkg/ops"
 	"github.com/spf13/cobra"
 	"github.com/subosito/gotenv"
@@ -161,12 +162,7 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	dotenvFilePath := os.Getenv("MC_DOTENV_PATH")
-	if dotenvFilePath == "" {
-		log.Fatalf("MC_DOTENV_PATH not set")
-	}
-
-	if err := gotenv.Load(dotenvFilePath); err != nil {
-		log.Fatalf("Loading %s failed: %s", dotenvFilePath, err)
+	if err := gotenv.Load(config.MustGetDotenvPath()); err != nil {
+		log.Fatalf("Loading dotenv file path %s failed: %s", config.MustGetDotenvPath(), err)
 	}
 }

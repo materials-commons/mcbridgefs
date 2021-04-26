@@ -24,6 +24,7 @@ import (
 	"github.com/apex/log"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/materials-commons/mcbridgefs/pkg/config"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/pkg/ops"
 	"github.com/spf13/cobra"
@@ -35,11 +36,7 @@ var (
 
 func init() {
 	cobra.OnInitialize(initConfig)
-
-	mcfsDir = os.Getenv("MCFS_DIR")
-	if mcfsDir == "" {
-		log.Fatalf("MCFS_DIR environment variable not set")
-	}
+	mcfsDir = config.MustGetMCFSDir()
 }
 
 // initConfig reads in config file and ENV variables if set.

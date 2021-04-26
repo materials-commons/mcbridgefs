@@ -3,12 +3,12 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/apex/log"
 	globus "github.com/materials-commons/goglobus"
+	"github.com/materials-commons/mcbridgefs/pkg/config"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/pkg/store"
 	"gorm.io/gorm"
@@ -33,17 +33,8 @@ func NewGlobusTaskMonitor(client *globus.Client, db *gorm.DB, endpointID string)
 		// set lastProcessedTime to a date far in the past so that we initially match all requests
 		lastProcessedTime:        time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
 		transferRequestFileStore: store.NewTransferRequestFileStore(db),
-		settlingPeriod:           getSettlingPeriod(),
+		settlingPeriod:           config.GetGlobusSettlingPeriod(),
 	}
-}
-
-func getSettlingPeriod() time.Duration {
-	d, err := time.ParseDuration(os.Getenv("MC_GLOBUS_SETTLING_PERIOD"))
-	if err != nil || d.Seconds() < 10 {
-		return 10 * time.Second
-	}
-
-	return d
 }
 
 func (m *GlobusTaskMonitor) Start(ctx context.Context) {
@@ -166,9 +157,6 @@ func (m *GlobusTaskMonitor) processFileTransfer(taskCompletionTime time.Time, pa
 	switch {
 	case err != nil:
 		log.Errorf("Unable to find transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
-		return
-	case transferRequestFile.UpdatedAt.After(taskCompletionTime):
-		// file was possibly changed since the task completed so ignore
 		return
 	case transferRequestFile.UpdatedAt.After(taskCompletionTime):
 		// file was possibly changed since the task completed so ignore

@@ -63,7 +63,7 @@ func CreateFS(fsRoot string, dB *gorm.DB) *Node {
 }
 
 func rootNode() *Node {
-	bridgeRoot, err := bridgefs.NewBridgeRoot(os.Getenv("MCFS_DIR"), nil, nil)
+	bridgeRoot, err := bridgefs.NewBridgeRoot(mcfsRoot, nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create root node: %s", err)
 	}

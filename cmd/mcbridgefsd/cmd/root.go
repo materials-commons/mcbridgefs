@@ -91,21 +91,25 @@ var rootCmd = &cobra.Command{
 		g.POST("/stop-bridge", stopBridgeController)
 		g.GET("/stop-server", stopServerController)
 
-		if err := e.Start("localhost:1323"); err != nil {
-			log.Fatalf("Unable to start web server: %s", err)
-		}
+		go func() {
+			if err := e.Start("localhost:1323"); err != nil {
+				log.Fatalf("Unable to start web server: %s", err)
+			}
+		}()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		_ = ctx
 
-		go func() {
-			if err := mcbridgefs.LoadProjectTransfers(db); err != nil {
-				log.Fatalf("Failed loading existing project transfers: %s", err)
-			}
-		}()
+		if err := mcbridgefs.LoadProjectTransfers(db); err != nil {
+			log.Fatalf("Failed loading existing project transfers: %s", err)
+		}
 
+		mountPath := filepath.Join(mcfsDir, "__transfers")
+		if err := os.MkdirAll(mountPath, 0777); err != nil {
+			log.Fatalf("Unable to make root dir '%s' to mount fs on: %s", mountPath, err)
+		}
 		rootNode := mcbridgefs.CreateFS(mcfsDir, db)
-		server := mustStartFuseFileServer(filepath.Join(mcfsDir, "__transfers"), rootNode)
+		server := mustStartFuseFileServer(mountPath, rootNode)
 
 		go server.listenForUnmount(cancel)
 

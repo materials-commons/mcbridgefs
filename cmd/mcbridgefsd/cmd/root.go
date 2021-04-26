@@ -15,17 +15,25 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/apex/log"
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/materials-commons/mcbridgefs/pkg/config"
+	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/pkg/ops"
 	"github.com/spf13/cobra"
 	"github.com/subosito/gotenv"
@@ -35,12 +43,34 @@ import (
 var (
 	activeBridges sync.Map
 	db            *gorm.DB
+	mcfsDir       string
 )
 
 type ActiveBridge struct {
 	TransferRequestID int    `json:"transfer_request_id"`
 	MountPath         string `json:"mount_path"`
 	Pid               int    `json:"pid"`
+}
+
+// Execute adds all child commands to the root command and sets flags appropriately.
+// This is called by main.main(). It only needs to happen once to the rootCmd.
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func init() {
+	cobra.OnInitialize(initConfig)
+}
+
+// initConfig reads in config file and ENV variables if set.
+func initConfig() {
+	if err := gotenv.Load(config.MustGetDotenvPath()); err != nil {
+		log.Fatalf("Loading dotenv file path %s failed: %s", config.MustGetDotenvPath(), err)
+	}
+	mcfsDir = config.MustGetMCFSDir()
 }
 
 var rootCmd = &cobra.Command{
@@ -64,6 +94,23 @@ var rootCmd = &cobra.Command{
 		if err := e.Start("localhost:1323"); err != nil {
 			log.Fatalf("Unable to start web server: %s", err)
 		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		_ = ctx
+
+		go func() {
+			if err := mcbridgefs.LoadProjectTransfers(db); err != nil {
+				log.Fatalf("Failed loading existing project transfers: %s", err)
+			}
+		}()
+
+		rootNode := mcbridgefs.CreateFS(mcfsDir, db)
+		server := mustStartFuseFileServer(filepath.Join(mcfsDir, "__transfers"), rootNode)
+
+		go server.listenForUnmount(cancel)
+
+		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])
+		server.Wait()
 	},
 }
 
@@ -147,22 +194,44 @@ func startBridge(req StartBridgeRequest) {
 	activeBridges.Delete(req.MountPath)
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+var timeout = 10 * time.Second
+
+type Server struct {
+	*fuse.Server
+	mountPoint string
+	c          chan os.Signal
+}
+
+func mustStartFuseFileServer(mountPoint string, root *mcbridgefs.Node) *Server {
+	opts := &fs.Options{
+		AttrTimeout:  &timeout,
+		EntryTimeout: &timeout,
+		MountOptions: fuse.MountOptions{
+			Debug:  false,
+			FsName: "mcfs",
+		},
+	}
+
+	server, err := fs.Mount(mountPoint, root, opts)
+	if err != nil {
+		log.Fatalf("Unable to mount project %s", err)
+	}
+
+	return &Server{
+		Server:     server,
+		mountPoint: mountPoint,
+		c:          make(chan os.Signal, 1),
 	}
 }
 
-func init() {
-	cobra.OnInitialize(initConfig)
-}
-
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	if err := gotenv.Load(config.MustGetDotenvPath()); err != nil {
-		log.Fatalf("Loading dotenv file path %s failed: %s", config.MustGetDotenvPath(), err)
+func (s *Server) listenForUnmount(cancelFunc context.CancelFunc) {
+	signal.Notify(s.c, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-s.c
+	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
+	cancelFunc()
+	if err := s.Unmount(); err != nil {
+		log.Errorf("Failed to unmount: %s, try '/usr/bin/fusermount -u %s' manually.", err, s.mountPoint)
 	}
+
+	os.Exit(0)
 }

@@ -178,7 +178,8 @@ func (m *GlobusTaskMonitor) processFileTransfer(taskCompletionTime time.Time, pa
 			log.Errorf("Unable to delete transfer file request for user: %d, project: %d, path: %s: %s", c.UserID, c.ProjectID, path, err)
 			return
 		}
-		// TODO: need to remove entry from openedFilesTracker
+
+		mcbridgefs.DeleteOpenFileFromTrackerByPath(path)
 	}
 
 }

@@ -62,7 +62,7 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 		return uint32(n), fs.ToErrno(err)
 	}
 
-	file := openedFilesTracker.Get(f.Path)
+	file := GetOpenFileFromTrackerByPath(f.Path)
 	if file != nil && n > 0 {
 		_, _ = io.Copy(file.hasher, bytes.NewBuffer(data[:n]))
 	}

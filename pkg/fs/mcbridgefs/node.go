@@ -28,13 +28,12 @@ type Node struct {
 }
 
 var (
-	uid, gid           uint32
-	mcfsRoot           string
-	db                 *gorm.DB
-	openedFilesTracker *OpenFilesTracker
-	fileStore          *store.FileStore
-	projectStore       *store.ProjectStore
-	userStore          *store.UserStore
+	uid, gid     uint32
+	mcfsRoot     string
+	db           *gorm.DB
+	fileStore    *store.FileStore
+	projectStore *store.ProjectStore
+	userStore    *store.UserStore
 )
 
 func init() {
@@ -47,10 +46,6 @@ func init() {
 	gid32, _ := strconv.ParseUint(u.Gid, 10, 32)
 	uid = uint32(uid32)
 	gid = uint32(gid32)
-
-	// Track any files that this instance writes to/create, so that if another instance does the same
-	// each of them will see their versions of the file, rather than intermixing them.
-	openedFilesTracker = NewOpenFilesTracker()
 }
 
 func CreateFS(fsRoot string, dB *gorm.DB) *Node {
@@ -401,7 +396,7 @@ func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint3
 	}
 
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	openedFilesTracker.Store(path, f)
+	AddOpenFileToTracker(path, f)
 
 	flags = flags &^ syscall.O_APPEND
 	fd, err := syscall.Open(f.ToUnderlyingFilePath(mcfsRoot), int(flags)|os.O_CREATE, mode)
@@ -448,7 +443,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				return nil, 0, syscall.EIO
 			}
 
-			openedFilesTracker.Store(path, newFile)
+			AddOpenFileToTracker(path, newFile)
 		} else {
 			_ = fileStore.MarkFileAsOpen(newFile)
 		}
@@ -462,7 +457,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 				// TODO: What error should be returned?
 				return nil, 0, syscall.EIO
 			}
-			openedFilesTracker.Store(path, newFile)
+			AddOpenFileToTracker(path, newFile)
 		} else {
 			// Update the transfer request file to state open
 			_ = fileStore.MarkFileAsOpen(newFile)
@@ -525,7 +520,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	// TODO: is n.file even valid anymore?
 	fileToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
-	nf := openedFilesTracker.Get(fpath)
+	nf := GetOpenFileFromTrackerByPath(fpath)
 	if nf != nil && nf.File != nil {
 		fileToUpdate = nf.File
 	}
@@ -717,7 +712,7 @@ func (n *Node) getTransferRequest(name string) (error, mcmodel.TransferRequest) 
 // getFromOpenedFiles returns the mcmodel.File from the openedFilesTracker. It handles
 // the case where the path wasn't found.
 func getFromOpenedFiles(path string) *mcmodel.File {
-	val := openedFilesTracker.Get(path)
+	val := GetOpenFileFromTrackerByPath(path)
 	if val != nil {
 		return val.File
 	}

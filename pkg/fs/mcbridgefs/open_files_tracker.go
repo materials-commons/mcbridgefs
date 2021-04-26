@@ -18,7 +18,11 @@ type OpenFile struct {
 	hasher   hash.Hash
 }
 
-func NewOpenFilesTracker() *OpenFilesTracker {
+// Track any files that this instance writes to/create, so that if another instance does the same
+// each of them will see their versions of the file, rather than intermixing them.
+var openFilesTracker = newOpenFilesTracker()
+
+func newOpenFilesTracker() *OpenFilesTracker {
 	return &OpenFilesTracker{}
 }
 
@@ -41,4 +45,16 @@ func (t *OpenFilesTracker) Get(path string) *OpenFile {
 
 func (t *OpenFilesTracker) Delete(path string) {
 	t.m.Delete(path)
+}
+
+func AddOpenFileToTracker(path string, file *mcmodel.File) {
+	openFilesTracker.Store(path, file)
+}
+
+func GetOpenFileFromTrackerByPath(path string) *OpenFile {
+	return openFilesTracker.Get(path)
+}
+
+func DeleteOpenFileFromTrackerByPath(path string) {
+	openFilesTracker.Delete(path)
 }

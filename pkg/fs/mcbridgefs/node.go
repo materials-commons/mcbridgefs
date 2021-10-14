@@ -342,7 +342,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	// If we are here then the file was opened with a write flag. In this case we need to update the
 	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
-	// TODO: is n.file every valid anymore?
+	// TODO: is n.file even valid anymore?
 	fileToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
 	nf := openedFilesTracker.Get(fpath)
@@ -475,19 +475,19 @@ func (n *Node) renameDir(fromPath, toPath, name, toName string, f mcmodel.File) 
 		// not being moved to another directory. Just rename directory and all descendant directory
 		// paths
 	}
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 func (n *Node) renameFile(fromPath, toPath, name, toName string, f mcmodel.File) syscall.Errno {
 	if fromPath == toPath {
 		// not being moved to another directory. Just rename file and all its previous versions
 	}
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
 	fmt.Printf("Unlink: %s/%s\n", n.Path(n.Root()), name)
-	return syscall.EINVAL
+	return syscall.EPERM
 }
 
 // getMode returns the mode for the file. It checks if the underlying mcmodel.File is

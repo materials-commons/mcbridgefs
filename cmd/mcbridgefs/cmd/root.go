@@ -110,6 +110,9 @@ file versions and consistency for the project that the transfer request is assoc
 		transferRequestMonitor := monitor.NewTransferRequestMonitor(db, ctx, transferRequest, onClose)
 		transferRequestMonitor.Start()
 
+		activityMonitor := monitor.NewActivityMonitor(db, transferRequest)
+		activityMonitor.Start(ctx)
+
 		go server.listenForUnmount(cancel)
 
 		log.Infof("Mounted project at %q, use ctrl+c to stop", args[0])

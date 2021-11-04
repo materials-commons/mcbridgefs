@@ -8,6 +8,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/monitor"
 )
 
 // Code based on loopback file system from github.com/hanwen/go-fuse/v2/fs/file.go
@@ -45,6 +46,8 @@ func NewFileHandle(fd int, flags uint32, path string) fs.FileHandle {
 func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
+
+	monitor.IncrementActivity()
 
 	n, err := syscall.Pwrite(f.Fd, data, off)
 	if err != fs.OK {

@@ -50,7 +50,7 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 	monitor.IncrementActivity()
 
 	n, err := syscall.Pwrite(f.Fd, data, off)
-	if err != fs.OK {
+	if err != nil {
 		return uint32(n), fs.ToErrno(err)
 	}
 

@@ -315,7 +315,11 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 // done by calling Ftruncate.
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	if sz, ok := in.GetSize(); ok {
-		fh := f.(*FileHandle)
+		fh, ok := f.(*FileHandle)
+		if !ok {
+			// For now lets return fs.OK, because there doesn't seem to be anything here
+			return fs.OK
+		}
 		return fs.ToErrno(syscall.Ftruncate(fh.Fd, int64(sz)))
 	}
 

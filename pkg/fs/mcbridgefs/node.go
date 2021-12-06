@@ -35,6 +35,7 @@ var (
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
 	fileStore          *store.FileStore
+	conversionStore    *store.ConversionStore
 )
 
 func init() {
@@ -68,6 +69,7 @@ func CreateFS(fsRoot string, dB *gorm.DB, tr mcmodel.TransferRequest) *Node {
 	db = dB
 	transferRequest = tr
 	fileStore = store.NewFileStore(db, fsRoot)
+	conversionStore = store.NewConversionStore(db)
 	return rootNode()
 }
 
@@ -374,7 +376,18 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		checksum = fmt.Sprintf("%x", nf.hasher.Sum(nil))
 	}
 
-	return fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, int64(size)))
+	errno := fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, int64(size)))
+
+	// Add to convertible list after marking as released to prevent the condition where the
+	// file hasn't been released but is picked up for conversion. This is a very unlikely
+	// case, but easy to prevent by releasing then adding to conversions list.
+	if fileToUpdate.IsConvertible() {
+		if _, err := conversionStore.AddFileToConvert(fileToUpdate); err != nil {
+			log.Errorf("Failed adding file to conversion: %d", fileToUpdate.ID)
+		}
+	}
+
+	return errno
 }
 
 // createNewMCFileVersion creates a new file version if there isn't already a version of the file

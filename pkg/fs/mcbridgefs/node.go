@@ -349,7 +349,6 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	// If we are here then the file was opened with a write flag. In this case we need to update the
 	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
-	// TODO: is n.file even valid anymore?
 	fileToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
 	nf := openedFilesTracker.Get(fpath)
@@ -489,6 +488,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 		Where("project_id = ?", transferRequest.ProjectID).
 		Where("name = ?", name).
 		Where("current = ?", true).
+		Where("deleted_at IS NULL").
 		Find(&f).Error
 
 	switch {

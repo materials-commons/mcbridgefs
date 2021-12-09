@@ -50,9 +50,10 @@ func (m *ActivityMonitor) monitorActivity(ctx context.Context) {
 		}
 	}
 
-	// If the bridge has been inactive for too long or told to shutdown then mark the transfer as closed so
+	// If the bridge has been inactive for too long or told to shut down then mark the transfer as closed so
 	// that we can begin cleaning it up.
 	_ = store.WithTxRetryDefault(func(tx *gorm.DB) error {
+		_ = tx.Model(m.transferRequest.GlobusTransfer).Updates(mcmodel.GlobusTransfer{State: "closed"}).Error
 		return tx.Model(m.transferRequest).Updates(mcmodel.TransferRequest{State: "closed"}).Error
 	}, m.db)
 }

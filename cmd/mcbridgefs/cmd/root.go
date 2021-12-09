@@ -89,7 +89,7 @@ file versions and consistency for the project that the transfer request is assoc
 
 		var transferRequest mcmodel.TransferRequest
 
-		if result := db.Preload("Owner").Find(&transferRequest, transferRequestID); result.Error != nil {
+		if result := db.Preload("Owner").Preload("GlobusTransfer").Find(&transferRequest, transferRequestID); result.Error != nil {
 			log.Fatalf("Unable to load TransferRequest id %d: %s", transferRequestID, result.Error)
 		}
 

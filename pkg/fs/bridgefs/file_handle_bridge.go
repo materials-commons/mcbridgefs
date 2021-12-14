@@ -45,7 +45,7 @@ var _ = (fs.FileSetattrer)((*BridgeFileHandle)(nil))
 var _ = (fs.FileAllocater)((*BridgeFileHandle)(nil))
 
 func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
-	log.Debug("BridgeFileHandle Read")
+	//log.Debug("BridgeFileHandle Read")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	r := fuse.ReadResultFd(uintptr(f.Fd), off, len(buf))
@@ -53,7 +53,7 @@ func (f *BridgeFileHandle) Read(ctx context.Context, buf []byte, off int64) (res
 }
 
 func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	log.Debug("BridgeFileHandle Write")
+	//log.Debug("BridgeFileHandle Write")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	n, err := syscall.Pwrite(f.Fd, data, off)
@@ -61,7 +61,7 @@ func (f *BridgeFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 }
 
 func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
-	log.Debug("BridgeFileHandle Release")
+	//log.Debug("BridgeFileHandle Release")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	if f.Fd != -1 {
@@ -73,7 +73,7 @@ func (f *BridgeFileHandle) Release(ctx context.Context) syscall.Errno {
 }
 
 func (f *BridgeFileHandle) Flush(ctx context.Context) syscall.Errno {
-	log.Debug("BridgeFileHandle Flush")
+	//log.Debug("BridgeFileHandle Flush")
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	// Since Flush() may be called for each dup'd Fd, we don't

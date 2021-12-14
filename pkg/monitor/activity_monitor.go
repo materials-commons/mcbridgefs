@@ -29,6 +29,7 @@ func NewActivityMonitor(db *gorm.DB, transferRequest mcmodel.TransferRequest) *A
 	return &ActivityMonitor{
 		db:              db,
 		transferRequest: transferRequest,
+		lastChanged:     time.Now(),
 	}
 }
 
@@ -63,7 +64,7 @@ func (m *ActivityMonitor) loadAndCheckIfBridgeInactiveForTooLong() bool {
 	now := time.Now()
 	if currentActivityCount == m.lastSeenActivityCount {
 		oneWeekSinceLastActivity := m.lastChanged.Add(oneWeek)
-		if oneWeekSinceLastActivity.After(now) {
+		if now.After(oneWeekSinceLastActivity) {
 			return true
 		}
 	} else {

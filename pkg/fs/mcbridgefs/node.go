@@ -17,6 +17,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/gomcdb/mcmodel"
+	"github.com/materials-commons/gomcdb/store"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
 	"gorm.io/gorm"
 )
@@ -33,7 +34,8 @@ var (
 	transferRequest    mcmodel.TransferRequest
 	openedFilesTracker *OpenFilesTracker
 	txRetryCount       int
-	fileStore          *FileStore
+	fileStore          *store.FileStore
+	conversionStore    *store.ConversionStore
 )
 
 func init() {
@@ -66,7 +68,8 @@ func CreateFS(fsRoot string, dB *gorm.DB, tr mcmodel.TransferRequest) *Node {
 	mcfsRoot = fsRoot
 	db = dB
 	transferRequest = tr
-	fileStore = NewFileStore(dB, fsRoot, &transferRequest)
+	fileStore = store.NewFileStore(db, fsRoot)
+	conversionStore = store.NewConversionStore(db)
 	return rootNode()
 }
 
@@ -104,7 +107,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
-	files, err := fileStore.ListDirectory(dir)
+	files, err := fileStore.ListDirectory(dir, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -150,7 +153,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		return fs.OK
 	}
 
-	file, err := fileStore.GetFileByPath(filepath.Join("/", n.Path(n.Root())))
+	file, err := fileStore.GetFileByPath(filepath.Join("/", n.Path(n.Root())), transferRequest)
 	if err != nil {
 		log.Errorf("Getattr: GetFileByPath failed (%s): %s\n", filepath.Join("/", n.Path(n.Root())), err)
 		return syscall.ENOENT
@@ -170,7 +173,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 // Lookup will return information about the current entry.
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	f, err := fileStore.GetFileByPath(path)
+	f, err := fileStore.GetFileByPath(path, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -204,7 +207,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		return nil, syscall.EINVAL
 	}
 
-	dir, err := fileStore.CreateDirectory(parent.ID, path, name)
+	dir, err := fileStore.CreateDirectory(parent.ID, path, name, transferRequest)
 
 	if err != nil {
 		return nil, syscall.EINVAL
@@ -315,7 +318,11 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 // done by calling Ftruncate.
 func (n *Node) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	if sz, ok := in.GetSize(); ok {
-		fh := f.(*FileHandle)
+		fh, ok := f.(*FileHandle)
+		if !ok {
+			// For now lets return fs.OK, because there doesn't seem to be anything here
+			return fs.OK
+		}
 		return fs.ToErrno(syscall.Ftruncate(fh.Fd, int64(sz)))
 	}
 
@@ -342,7 +349,6 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 
 	// If we are here then the file was opened with a write flag. In this case we need to update the
 	// file size, set this as the current file, and if a new checksum was computed, set the checksum.
-	// TODO: is n.file even valid anymore?
 	fileToUpdate := n.file
 	fpath := filepath.Join("/", n.Path(n.Root()))
 	nf := openedFilesTracker.Get(fpath)
@@ -350,12 +356,37 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		fileToUpdate = nf.File
 	}
 
+	var (
+		size  uint64
+		attrs fuse.AttrOut
+	)
+
+	fhGetAttr, ok := f.(fs.FileGetattrer)
+	if !ok {
+		size = 0
+	}
+
+	if err := fhGetAttr.Getattr(ctx, &attrs); err == fs.OK {
+		size = attrs.Size
+	}
+
 	var checksum string
 	if nf != nil {
 		checksum = fmt.Sprintf("%x", nf.hasher.Sum(nil))
 	}
 
-	return fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum))
+	errno := fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, int64(size)))
+
+	// Add to convertible list after marking as released to prevent the condition where the
+	// file hasn't been released but is picked up for conversion. This is a very unlikely
+	// case, but easy to prevent by releasing then adding to conversions list.
+	if fileToUpdate.IsConvertible() {
+		if _, err := conversionStore.AddFileToConvert(fileToUpdate); err != nil {
+			log.Errorf("Failed adding file to conversion: %d", fileToUpdate.ID)
+		}
+	}
+
+	return errno
 }
 
 // createNewMCFileVersion creates a new file version if there isn't already a version of the file
@@ -385,7 +416,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory)
+	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory, transferRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +452,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	return fileStore.CreateNewFile(file, dir)
+	return fileStore.CreateNewFile(file, dir, transferRequest)
 }
 
 // getMimeType will determine the type of a file from its extension. It strips out the extra information
@@ -457,6 +488,7 @@ func (n *Node) Rename(ctx context.Context, name string, newParent fs.InodeEmbedd
 		Where("project_id = ?", transferRequest.ProjectID).
 		Where("name = ?", name).
 		Where("current = ?", true).
+		Where("deleted_at IS NULL").
 		Find(&f).Error
 
 	switch {

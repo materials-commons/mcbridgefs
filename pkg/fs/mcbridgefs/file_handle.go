@@ -7,7 +7,9 @@ import (
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/bridgefs"
+	"github.com/materials-commons/mcbridgefs/pkg/monitor"
 )
 
 // Code based on loopback file system from github.com/hanwen/go-fuse/v2/fs/file.go
@@ -46,8 +48,10 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 
+	monitor.IncrementActivity()
+
 	n, err := syscall.Pwrite(f.Fd, data, off)
-	if err != fs.OK {
+	if err != nil {
 		return uint32(n), fs.ToErrno(err)
 	}
 
@@ -57,6 +61,16 @@ func (f *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32,
 	}
 
 	return uint32(n), fs.OK
+}
+
+func (f *FileHandle) Read(ctx context.Context, buf []byte, off int64) (res fuse.ReadResult, errno syscall.Errno) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+
+	monitor.IncrementActivity()
+
+	r := fuse.ReadResultFd(uintptr(f.Fd), off, len(buf))
+	return r, fs.OK
 }
 
 func (f *FileHandle) Flush(ctx context.Context) syscall.Errno {

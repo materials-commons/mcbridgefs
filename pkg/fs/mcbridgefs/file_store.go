@@ -128,6 +128,7 @@ func (s *FileStore) FindDirByPath(projectID int, path string) (*mcmodel.File, er
 	err := s.db.Preload("Directory").
 		Where("project_id = ?", projectID).
 		Where("path = ?", path).
+		Where("deleted_at IS NULL").
 		First(&dir).Error
 	if err != nil {
 		log.Errorf("Failed looking up directory in project %d, path %s: %s", projectID, path, err)
@@ -173,6 +174,7 @@ func (s *FileStore) ListDirectory(dir *mcmodel.File) ([]mcmodel.File, error) {
 
 	err := s.db.Where("directory_id = ?", dir.ID).
 		Where("project_id", s.transferRequest.ProjectID).
+		Where("deleted_at IS NULL").
 		Where("current = true").
 		Find(&files).Error
 	if err != nil {
@@ -242,6 +244,7 @@ func (s *FileStore) GetFileByPath(path string) (*mcmodel.File, error) {
 	err = s.db.Preload("Directory").
 		Where("directory_id = ?", dir.ID).
 		Where("name = ?", fileName).
+		Where("deleted_at IS NULL").
 		Where("current = ?", true).
 		First(&file).Error
 

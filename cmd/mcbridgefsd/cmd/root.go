@@ -52,11 +52,6 @@ var rootCmd = &cobra.Command{
 	Short: "Server for launching bridges",
 	Long:  `The mcbridgefsd is responsible for launching new mcbridgefs and monitoring if they exit prematurely.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		e := echo.New()
-		e.HideBanner = true
-		e.HidePort = true
-		e.Use(middleware.Recover())
-
 		var err error
 		gormConfig := &gorm.Config{
 			Logger: logger.Default.LogMode(logger.Silent),
@@ -64,6 +59,15 @@ var rootCmd = &cobra.Command{
 		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
 			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
 		}
+
+		// Remove any existing globus_transfers and transfer_requests because there is no longer
+		// a bridge associated with them.
+		closeExistingGlobusTransfers(db)
+
+		e := echo.New()
+		e.HideBanner = true
+		e.HidePort = true
+		e.Use(middleware.Recover())
 
 		g := e.Group("/api")
 		g.POST("/start-bridge", startBridgeController)
@@ -75,6 +79,14 @@ var rootCmd = &cobra.Command{
 			log.Fatalf("Unable to start web server: %s", err)
 		}
 	},
+}
+
+// closeExistingGlobusTransfers will mark all existing globus transfers and transfer requests
+// as closed so they can be cleaned up. When the server starts it performs this action to
+// remove old requests that no longer have a bridge associated with them.
+func closeExistingGlobusTransfers(db *gorm.DB) {
+	_ = db.Exec("update globus_transfers set state = ?", "closed").Error
+	_ = db.Exec("update transfer_requests set state = ?", "closed").Error
 }
 
 func stopServerController(_ echo.Context) error {

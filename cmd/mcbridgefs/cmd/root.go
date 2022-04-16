@@ -28,10 +28,6 @@ import (
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/materials-commons/mcbridgefs/pkg/fs/mcbridgefs"
 	"github.com/materials-commons/mcbridgefs/pkg/monitor"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
 	"github.com/spf13/cobra"
 )
 
@@ -74,18 +70,7 @@ file versions and consistency for the project that the transfer request is assoc
 			log.Fatalf("No transfer request specified.")
 		}
 
-		var (
-			err error
-			db  *gorm.DB
-		)
-
-		gormConfig := &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Silent),
-		}
-
-		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
-			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
-		}
+		db := mcdb.MustConnectToDB()
 
 		var transferRequest mcmodel.TransferRequest
 

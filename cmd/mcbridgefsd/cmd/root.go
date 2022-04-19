@@ -22,16 +22,13 @@ import (
 	"sync"
 
 	"github.com/apex/log"
+	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	mcdb "github.com/materials-commons/gomcdb"
 	"github.com/materials-commons/gomcdb/mcmodel"
 	"github.com/spf13/cobra"
 	"github.com/subosito/gotenv"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
-	"github.com/labstack/echo/v4"
 )
 
 var (
@@ -52,13 +49,7 @@ var rootCmd = &cobra.Command{
 	Short: "Server for launching bridges",
 	Long:  `The mcbridgefsd is responsible for launching new mcbridgefs and monitoring if they exit prematurely.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		var err error
-		gormConfig := &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Silent),
-		}
-		if db, err = gorm.Open(mysql.Open(mcdb.MakeDSNFromEnv()), gormConfig); err != nil {
-			log.Fatalf("Failed to open db (%s): %s", mcdb.MakeDSNFromEnv(), err)
-		}
+		db := mcdb.MustConnectToDB()
 
 		// Remove any existing globus_transfers and transfer_requests because there is no longer
 		// a bridge associated with them.

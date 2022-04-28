@@ -146,6 +146,8 @@ github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0 h1:E8mA
 github.com/materials-commons/goglobus v0.0.0-20210124215528-2901cb3543e0/go.mod h1:9Vxy/5aFD1rhUO5JlqZjfUik8MlZZExFSECirJGmK5w=
 github.com/materials-commons/gomcdb v0.0.0-20211208213533-c08731a9e2a2 h1:j7G4rIHF8dFHAEmcdO74YsjUNMu9FhnAsWbCdDa8vkQ=
 github.com/materials-commons/gomcdb v0.0.0-20211208213533-c08731a9e2a2/go.mod h1:PyRr4cTLJifG3W0GWYZbiNzRZdo3dteiYZy1lG5Of4M=
+github.com/materials-commons/gomcdb v0.0.0-20220428152804-3c12fd3709b6 h1:BaYioUFUNuqCKNjT6lqtesv4WXR53iARLQfgrGKNk40=
+github.com/materials-commons/gomcdb v0.0.0-20220428152804-3c12fd3709b6/go.mod h1:PyRr4cTLJifG3W0GWYZbiNzRZdo3dteiYZy1lG5Of4M=
 github.com/materials-commons/mc v0.0.0-20190920151351-e37fe638d79b h1:6QjhQLju1R1ISNWPvyT/Lq6OzniVfo2ZA0X5uEXldhE=
 github.com/materials-commons/mc v0.0.0-20190920151351-e37fe638d79b/go.mod h1:iH4mslNI2jEr5+iSf/TuLqysPUTptczvzYyzJpd7+S4=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=

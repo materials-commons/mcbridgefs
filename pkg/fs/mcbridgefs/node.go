@@ -28,14 +28,16 @@ type Node struct {
 }
 
 var (
-	uid, gid           uint32
-	mcfsRoot           string
-	db                 *gorm.DB
-	transferRequest    mcmodel.TransferRequest
-	openedFilesTracker *OpenFilesTracker
-	txRetryCount       int
-	fileStore          *store.FileStore
-	conversionStore    *store.ConversionStore
+	uid, gid                 uint32
+	mcfsRoot                 string
+	db                       *gorm.DB
+	transferRequest          mcmodel.TransferRequest
+	openedFilesTracker       *OpenFilesTracker
+	txRetryCount             int
+	fileStore                store.FileStore
+	transferRequestFileStore store.TransferRequestFileStore
+	transferRequestStore     store.TransferRequestStore
+	conversionStore          store.ConversionStore
 )
 
 func init() {
@@ -68,8 +70,10 @@ func CreateFS(fsRoot string, dB *gorm.DB, tr mcmodel.TransferRequest) *Node {
 	mcfsRoot = fsRoot
 	db = dB
 	transferRequest = tr
-	fileStore = store.NewFileStore(db, fsRoot)
-	conversionStore = store.NewConversionStore(db)
+	fileStore = store.NewGormFileStore(db, fsRoot)
+	conversionStore = store.NewGormConversionStore(db)
+	transferRequestFileStore = store.NewGormTransferRequestFileStore(db)
+	transferRequestStore = store.NewGormTransferRequestStore(db, fsRoot)
 	return rootNode()
 }
 
@@ -107,7 +111,7 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, syscall.ENOENT
 	}
 
-	files, err := fileStore.ListDirectory(dir, transferRequest)
+	files, err := transferRequestStore.ListDirectory(dir, transferRequest)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -153,7 +157,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 		return fs.OK
 	}
 
-	file, err := fileStore.GetFileByPath(filepath.Join("/", n.Path(n.Root())), transferRequest)
+	file, err := fileStore.GetFileByPath(transferRequest.ProjectID, filepath.Join("/", n.Path(n.Root())))
 	if err != nil {
 		log.Errorf("Getattr: GetFileByPath failed (%s): %s\n", filepath.Join("/", n.Path(n.Root())), err)
 		return syscall.ENOENT
@@ -173,7 +177,7 @@ func (n *Node) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) 
 // Lookup will return information about the current entry.
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	f, err := fileStore.GetFileByPath(path, transferRequest)
+	f, err := fileStore.GetFileByPath(transferRequest.ProjectID, path)
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
@@ -195,7 +199,7 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 // getMCDir looks a directory up in the database.
 func (n *Node) getMCDir(name string) (*mcmodel.File, error) {
 	path := filepath.Join("/", n.Path(n.Root()), name)
-	return fileStore.FindDirByPath(transferRequest.ProjectID, path)
+	return fileStore.GetDirByPath(transferRequest.ProjectID, path)
 }
 
 // Mkdir will create a new directory. If an attempt is made to create an existing directory then it will return
@@ -207,7 +211,7 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		return nil, syscall.EINVAL
 	}
 
-	dir, err := fileStore.CreateDirectory(parent.ID, path, name, transferRequest)
+	dir, err := fileStore.CreateDirectory(parent.ID, transferRequest.ProjectID, transferRequest.OwnerID, path, name)
 
 	if err != nil {
 		return nil, syscall.EINVAL
@@ -375,7 +379,7 @@ func (n *Node) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		checksum = fmt.Sprintf("%x", nf.hasher.Sum(nil))
 	}
 
-	errno := fs.ToErrno(fileStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, int64(size)))
+	errno := fs.ToErrno(transferRequestStore.MarkFileReleased(fileToUpdate, checksum, transferRequest.ProjectID, int64(size)))
 
 	// Add to convertible list after marking as released to prevent the condition where the
 	// file hasn't been released but is picked up for conversion. This is a very unlikely
@@ -416,7 +420,7 @@ func (n *Node) createNewMCFileVersion() (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	newFile, err = fileStore.CreateNewFile(newFile, n.file.Directory, transferRequest)
+	newFile, err = transferRequestStore.CreateNewFile(newFile, n.file.Directory, transferRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +456,7 @@ func (n *Node) createNewMCFile(name string) (*mcmodel.File, error) {
 		Current:     false,
 	}
 
-	return fileStore.CreateNewFile(file, dir, transferRequest)
+	return transferRequestStore.CreateNewFile(file, dir, transferRequest)
 }
 
 // getMimeType will determine the type of a file from its extension. It strips out the extra information
